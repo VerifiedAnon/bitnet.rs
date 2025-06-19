@@ -1,0 +1,20 @@
+[package]
+name = "bitnet-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# The app depends on our core engine.
+bitnet-core = { path = "../bitnet-core" }
+
+# CLI and GUI libraries
+clap = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true }
+
+# Other utilities
+anyhow = { workspace = true }
+directories = { workspace = true }
+log = { workspace = true }
+tracing = { workspace = true }
+rand = "0.9.1"

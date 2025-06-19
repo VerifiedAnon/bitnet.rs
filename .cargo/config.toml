@@ -1,0 +1,2 @@
+[alias]
+combine = "run --release --package bitnet-tools --bin combine_files" 

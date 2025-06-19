@@ -1,0 +1,48 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/bitnet-app",
+    "crates/bitnet-core",
+    "crates/bitnet-converter",
+    "crates/bitnet-tools",
+    "crates/bitnet-tools/gui_combiner"
+]
+edition = "2021"
+
+# Common dependencies for the entire workspace to ensure version consistency.
+[workspace.dependencies]
+# The core tensor & ML framework
+# burn = { version = "0.17.1", default-features = false, features = ["ndarray", "wgpu", "train", "record-item-custom-serde"] }
+half = "2.4.1"
+# We explicitly define the correct bincode version that burn v0.14.0 needs.
+bincode = { version = "2.0.1", features = ["serde"] }
+
+# Common utilities
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0.12"
+log = "0.4"
+tracing = "0.1"
+anyhow = "1.0"
+
+# Hugging Face ecosystem
+hf-hub = "0.4.3"
+safetensors = "0.5.3"
+tokenizers = "0.21.1"
+
+# CLI and GUI
+clap = { version = "4.5.9", features = ["derive"] }
+indicatif = "0.17.8"
+egui = "0.31.1"
+eframe = "0.31.1"
+directories = "6.0.0"
+
+# Test/dev utilities
+pollster = "0.4.0"
+bytemuck = { version = "1.15.0", features = ["derive"] }
+
+# Added burn-wgpu dependency with the 'vulkan' feature enabled
+# burn-wgpu = { version = "0.17.1", features = ["vulkan"] }
+
+[alias]
+combine = "run --release --package bitnet-tools --bin combine_files"

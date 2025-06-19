@@ -1,0 +1,1695 @@
+bitnet-core/
+└── bitnet-core
+    ├── Cargo.toml
+    ├── README.md
+    ├── src
+    │   ├── attention.rs
+    │   ├── bitnet_linear.rs
+    │   ├── embedding.rs
+    │   ├── feed_forward.rs
+    │   ├── gui
+    │   │   ├── attention_map.rs
+    │   │   ├── dashboard.rs
+    │   │   ├── kernel_profiler.rs
+    │   │   ├── mod.rs
+    │   │   ├── README.md
+    │   │   └── weights_viewer.rs
+    │   ├── kernels
+    │   │   ├── bitnet_kernel.wgsl
+    │   │   └── README.md
+    │   ├── kernels.rs
+    │   ├── lib.rs
+    │   ├── model.rs
+    │   ├── op.rs
+    │   ├── rms_norm.rs
+    │   ├── settings.rs
+    │   ├── tokenizer.rs
+    │   ├── training.rs
+    │   └── visualization.rs
+    └── tests
+        ├── kernel_tests.rs
+        └── validation.rs
+
+
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\Cargo.toml ---
+[package]
+name = "bitnet-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Use burn and explicitly enable the wgpu backend.
+burn = { workspace = true }
+
+# Explicitly use the workspace version of bincode.
+bincode = { workspace = true }
+
+# Utilities for loading and configuration
+serde = { workspace = true }
+serde_json = { workspace = true }
+hf-hub = { workspace = true }
+safetensors = { workspace = true }
+tokenizers = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+tracing = { workspace = true }
+bytemuck = { workspace = true }
+burn-wgpu = { workspace = true }
+pollster = { workspace = true }
+derive-new = "0.6.0"
+
+[dev-dependencies]
+# (none)
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\README.md ---
+# BitNet Core (bitnet-core)
+
+This crate provides the core inference and (planned) training engine for BitNet models, including all performance-critical logic, model definitions, and backend implementations.
+
+## Purpose
+- Serve as the backend engine for BitNet inference and training
+- Provide modular, extensible components for model architecture, quantization, and kernel dispatch
+- Support both CPU (SIMD) and GPU (WGSL) backends
+
+## Main Modules
+- `model.rs`: High-level Transformer model architecture
+- `attention.rs`, `feed_forward.rs`, `rms_norm.rs`: Core model submodules
+- `op.rs`: BitLinear custom operator and backend dispatch
+- `kernels/`: CPU/GPU kernel implementations
+- `tokenizer.rs`: Text tokenizer and chat template logic
+- `settings.rs`: Inference and generation settings
+- `embedding.rs`: Embedding layer
+- `training.rs`: (Planned) Training loop, optimizer, scheduler
+- `visualization.rs`: (Planned) Logging, metrics, and visualization hooks
+- `gui/`: (Planned) Core-level visualization and debugging UI for developers
+
+## How to Use
+Add to your `Cargo.toml`:
+```toml
+bitnet-core = { path = "../bitnet-core" }
+```
+
+Then in your code:
+```rust
+use bitnet_core::model::Transformer;
+// ...
+```
+
+## Features
+- Modular design for extensibility
+- Optional GPU and core-gui features
+- Designed for correctness, performance, and portability
+
+## Implementation Notes
+- See the project plan for architecture and validation strategies
+- Use feature flags to enable GPU or core-gui modules 
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\attention.rs ---
+//! Attention block implementation for BitNet using the burn framework.
+
+use burn::{
+    prelude::*,
+    module::Module,
+    tensor::{
+        backend::Backend,
+        Tensor,
+        Float,
+    },
+    nn::{
+        Dropout, DropoutConfig,
+    },
+};
+use crate::op::{BitLinear, BitLinearConfig};
+
+// Configuration for the Attention module.
+#[derive(Config)]
+pub struct AttentionConfig {
+    /// The size of the model's hidden state.
+    pub hidden_size: usize,
+    /// The number of attention heads.
+    pub num_heads: usize,
+    /// Dropout probability.
+    #[config(default = "0.1")]
+    pub dropout: f64,
+}
+
+/// The Attention module.
+/// It contains the four projection layers and dropout.
+#[derive(Module, Debug)]
+pub struct Attention<B: Backend> {
+    q_proj: BitLinear<B>,
+    k_proj: BitLinear<B>,
+    v_proj: BitLinear<B>,
+    o_proj: BitLinear<B>,
+    dropout: Dropout,
+    num_heads: usize,
+    head_dim: usize,
+}
+
+impl AttentionConfig {
+    /// Initialize a new Attention module with default weights.
+    /// In a real scenario, we will load weights into this module later.
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Attention<B> {
+        assert!(
+            self.hidden_size % self.num_heads == 0,
+            "Hidden size must be divisible by the number of heads."
+        );
+
+        let head_dim = self.hidden_size / self.num_heads;
+        let linear_config = BitLinearConfig::new(self.hidden_size, self.hidden_size);
+
+        Attention {
+            q_proj: linear_config.init(device),
+            k_proj: linear_config.init(device),
+            v_proj: linear_config.init(device),
+            o_proj: linear_config.init(device),
+            dropout: DropoutConfig::new(self.dropout).init(),
+            num_heads: self.num_heads,
+            head_dim,
+        }
+    }
+}
+
+impl<B: Backend> Attention<B> {
+    /// The forward pass for the attention mechanism.
+    pub fn forward(&self, x: Tensor<B, 3, Float>) -> Tensor<B, 3, Float> {
+        let [batch_size, seq_len, _d_model] = x.dims();
+
+        // 1. Project inputs to Q, K, V
+        let q = self.q_proj.forward(x.clone());
+        let k = self.k_proj.forward(x.clone());
+        let v = self.v_proj.forward(x);
+
+        // 2. Reshape and transpose for multi-head attention
+        // [batch, seq_len, hidden_size] -> [batch, seq_len, num_heads, head_dim] -> [batch, num_heads, seq_len, head_dim]
+        let q = q.reshape([batch_size, seq_len, self.num_heads, self.head_dim]).swap_dims(1, 2);
+        let k = k.reshape([batch_size, seq_len, self.num_heads, self.head_dim]).swap_dims(1, 2);
+        let v = v.reshape([batch_size, seq_len, self.num_heads, self.head_dim]).swap_dims(1, 2);
+
+        // TODO: Apply Rotary Position Embeddings (RoPE) to Q and K tensors here.
+        // This is a critical step for positional awareness in transformers.
+        // let (q, k) = apply_rope(q, k, ...);
+
+        // 3. Scaled Dot-Product Attention
+        // (Q @ K^T) / sqrt(d_k)
+        let attn_scores = q.matmul(k.transpose());
+        let scaled_attn_scores = attn_scores.div_scalar( (self.head_dim as f32).sqrt() );
+
+        // Softmax to get attention weights
+        let attn_weights = scaled_attn_scores.softmax(-1);
+        let attn_weights = self.dropout.forward(attn_weights);
+
+        // 4. Apply attention weights to V
+        let context = attn_weights.matmul(v);
+
+        // 5. Reshape and project output
+        // [batch, num_heads, seq_len, head_dim] -> [batch, seq_len, num_heads, head_dim] -> [batch, seq_len, hidden_size]
+        let context = context.swap_dims(1, 2).reshape([batch_size, seq_len, self.hidden_size]);
+        
+        self.o_proj.forward(context)
+    }
+}
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\bitnet_linear.rs ---
+use burn::{
+    prelude::*,
+    backend::wgpu::{Wgpu, WgpuDevice},
+    tensor::{Int, Float, Tensor, TensorData},
+};
+use crate::kernels::{BitnetMetadata, pack_ternary_weights, calculate_weight_scales};
+use burn::kernel_wgsl;
+
+kernel_wgsl!(
+    BitnetKernel,
+    include_str!("kernels/bitnet_kernel.wgsl")
+);
+
+// BitnetLinear: Linear layer using custom BitNet kernel
+pub struct BitnetLinear {
+    weight_scales: Tensor<Wgpu<f32, i32>, 1, Float>,
+    packed_weights: Tensor<Wgpu<f32, i32>, 2, Int>,
+    out_features: usize,
+    in_features: usize,
+}
+
+impl BitnetLinear {
+    pub fn new(
+        packed_weights: Vec<Vec<u32>>, // [out_features, in_features/16]
+        weight_scales: Vec<f32>,
+        in_features: usize,
+        out_features: usize,
+        device: &WgpuDevice,
+    ) -> Self {
+        let packed_weights_flat: Vec<i32> = packed_weights.into_iter().flatten().map(|x| x as i32).collect();
+        let packed_weights = Tensor::<Wgpu<f32, i32>, 2, Int>::from_data(
+            TensorData::new(packed_weights_flat, vec![out_features, in_features / 16]),
+            device,
+        );
+        let weight_scales = Tensor::<Wgpu<f32, i32>, 1, Float>::from_data(
+            TensorData::new(weight_scales, vec![out_features]),
+            device,
+        );
+        Self {
+            weight_scales,
+            packed_weights,
+            out_features,
+            in_features,
+        }
+    }
+
+    pub fn forward(&self, input: Tensor<Wgpu<f32, i32>, 2, Float>) -> Tensor<Wgpu<f32, i32>, 2, Float> {
+        // Quantize input to int8 with per-token scaling (batch-wise)
+        let (quantized_input, activation_scales) = quantize_activations(input.clone());
+        let [batch_size, _] = quantized_input.dims();
+
+        // Prepare metadata
+        let metadata = BitnetMetadata {
+            m: batch_size as u32,
+            n: self.out_features as u32,
+            k: self.in_features as u32,
+            k_packed: (self.in_features / 16) as u32,
+        };
+
+        // Prepare output tensor
+        let output = Tensor::<Wgpu<f32, i32>, 2, Float>::zeros([batch_size, self.out_features], &quantized_input.device());
+
+        // TODO: Integrate kernel launch here using Burn's kernel API (see test for reference)
+        // For now, just return zeros as a placeholder
+        output
+    }
+}
+
+// Quantization function for BitNet activations
+fn quantize_activations(
+    input: Tensor<Wgpu<f32, i32>, 2, Float>
+) -> (
+    Tensor<Wgpu<f32, i32>, 2, Int>,
+    Tensor<Wgpu<f32, i32>, 1, Float>
+) {
+    let [batch_size, seq_len] = input.dims();
+    // Calculate per-token quantization scales
+    let abs_max = input.clone().abs().max_dim(1).squeeze(1); // [batch_size]
+    let scales = abs_max / 127.0;
+    // Quantize to int8 range
+    let quantized = (input / scales.clone().unsqueeze_dim(1))
+        .clamp(-127.0, 127.0)
+        .round()
+        .int();
+    (quantized, scales)
+}
+
+// High-level BitNet model builder
+pub struct BitnetModelBuilder {
+    device: WgpuDevice,
+    layers: Vec<BitnetLinear>,
+}
+
+impl BitnetModelBuilder {
+    pub fn new(device: WgpuDevice) -> Self {
+        Self { device, layers: Vec::new() }
+    }
+    pub fn add_linear_layer(
+        mut self,
+        ternary_weights: Vec<Vec<i8>>, // [out_features, in_features]
+        in_features: usize,
+        out_features: usize,
+    ) -> Self {
+        let packed_weights: Vec<Vec<u32>> = ternary_weights
+            .iter()
+            .map(|row| pack_ternary_weights(row))
+            .collect();
+        let weight_scales = calculate_weight_scales(&ternary_weights);
+        let layer = BitnetLinear::new(
+            packed_weights,
+            weight_scales,
+            in_features,
+            out_features,
+            &self.device,
+        );
+        self.layers.push(layer);
+        self
+    }
+    pub fn build(self) -> BitnetModel {
+        BitnetModel {
+            layers: self.layers,
+            device: self.device,
+        }
+    }
+}
+
+pub struct BitnetModel {
+    layers: Vec<BitnetLinear>,
+    device: WgpuDevice,
+}
+
+impl BitnetModel {
+    pub fn forward(&self, mut input: Tensor<Wgpu<f32, i32>, 2, Float>) -> Tensor<Wgpu<f32, i32>, 2, Float> {
+        for layer in &self.layers {
+            input = layer.forward(input);
+        }
+        input
+    }
+} 
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\embedding.rs ---
+//! Embedding layer for BitNet, implemented as a burn module.
+
+use burn::{
+    prelude::*,
+    module::Module,
+    tensor::{
+        backend::Backend,
+        Tensor,
+        Float,
+        Int,
+    },
+    // We will use burn's built-in Embedding module.
+    nn,
+};
+
+// Configuration for the Embedding module.
+#[derive(Config)]
+pub struct EmbeddingConfig {
+    /// The size of the vocabulary.
+    num_embeddings: usize,
+    /// The size of the model's hidden state (embedding dimension).
+    d_model: usize,
+}
+
+/// The Embedding module.
+/// This is a simple wrapper around burn's nn::Embedding.
+#[derive(Module, Debug)]
+pub struct Embedding<B: Backend> {
+    // The underlying embedding layer from the burn framework.
+    embedding: nn::Embedding<B>,
+}
+
+impl EmbeddingConfig {
+    /// Initialize a new Embedding module.
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Embedding<B> {
+        Embedding {
+            embedding: nn::EmbeddingConfig::new(self.num_embeddings, self.d_model).init(device),
+        }
+    }
+}
+
+impl<B: Backend> Embedding<B> {
+    /// The forward pass for the embedding layer.
+    /// It takes a tensor of integer token IDs and returns a tensor of float embeddings.
+    pub fn forward(&self, x: Tensor<B, 2, Int>) -> Tensor<B, 3, Float> {
+        self.embedding.forward(x)
+    }
+}
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\feed_forward.rs ---
+//! Feed-Forward block implementation for BitNet using the burn framework.
+
+use burn::{
+    prelude::*,
+    module::Module,
+    tensor::{
+        backend::Backend,
+        Tensor,
+        Float,
+    },
+    nn::{
+        // We use burn's GELU activation function.
+        Gelu,
+    },
+};
+use crate::op::{BitLinear, BitLinearConfig};
+
+// Configuration for the FeedForward module.
+#[derive(Config)]
+pub struct FeedForwardConfig {
+    /// The size of the model's hidden state.
+    pub hidden_size: usize,
+    /// The size of the intermediate layer. Often 4 * hidden_size.
+    pub intermediate_size: usize,
+}
+
+/// The FeedForward module.
+/// It consists of two of our custom BitLinear layers and a GELU activation.
+#[derive(Module, Debug)]
+pub struct FeedForward<B: Backend> {
+    w1: BitLinear<B>,
+    w2: BitLinear<B>,
+    gelu: Gelu,
+}
+
+impl FeedForwardConfig {
+    /// Initialize a new FeedForward module.
+    pub fn init<B: Backend>(&self, device: &B::Device) -> FeedForward<B> {
+        let config_w1 = BitLinearConfig::new(self.hidden_size, self.intermediate_size);
+        let config_w2 = BitLinearConfig::new(self.intermediate_size, self.hidden_size);
+
+        FeedForward {
+            w1: config_w1.init(device),
+            w2: config_w2.init(device),
+            gelu: Gelu::new(),
+        }
+    }
+}
+
+impl<B: Backend> FeedForward<B> {
+    /// The forward pass for the feed-forward network.
+    /// It follows the standard pattern: linear -> activation -> linear.
+    pub fn forward(&self, x: Tensor<B, 3, Float>) -> Tensor<B, 3, Float> {
+        let x = self.w1.forward(x);
+        let x = self.gelu.forward(x);
+        self.w2.forward(x)
+    }
+}
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\gui\attention_map.rs ---
+// attention_map.rs
+// Visualization of attention matrices and activations.
+
+#[cfg(feature = "core-gui")]
+pub fn show_attention_map(ui: &mut egui::Ui, attention: &[f32], rows: usize, cols: usize) {
+    ui.label("Attention map (placeholder)");
+    // TODO: Use egui or plotters to render a heatmap of the attention matrix.
+}
+
+// TODO: Implement attention map visualization UI and logic. 
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\gui\dashboard.rs ---
+// dashboard.rs
+// Minimal dashboard for real-time metrics, kernel timings, and training progress.
+
+#[cfg(feature = "core-gui")]
+pub fn run_dashboard() {
+    eframe::run_native(
+        "BitNet Core Dashboard",
+        eframe::NativeOptions::default(),
+        Box::new(|_cc| Box::new(DashboardApp::default())),
+    );
+}
+
+#[cfg(feature = "core-gui")]
+#[derive(Default)]
+struct DashboardApp;
+
+#[cfg(feature = "core-gui")]
+impl eframe::App for DashboardApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("BitNet Core Dashboard");
+            ui.label("Metrics, kernel timings, and training progress will appear here.");
+        });
+    }
+}
+
+// TODO: Implement dashboard UI for metrics and progress visualization. 
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\gui\kernel_profiler.rs ---
+// kernel_profiler.rs
+// Interactive profiling and visualization of CPU/GPU kernel performance and correctness.
+
+#[cfg(feature = "core-gui")]
+pub fn show_kernel_profiler(ui: &mut egui::Ui) {
+    ui.label("Kernel profiler (placeholder)");
+    // TODO: Display timings, call graphs, SIMD/GPU stats using egui or plotters.
+}
+
+// TODO: Implement kernel profiler UI and logic. 
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\gui\mod.rs ---
+// mod.rs
+// Entry point for core GUI/visualization features in bitnet-core.
+
+#[cfg(feature = "core-gui")]
+pub mod dashboard;
+#[cfg(feature = "core-gui")]
+pub mod weights_viewer;
+#[cfg(feature = "core-gui")]
+pub mod kernel_profiler;
+#[cfg(feature = "core-gui")]
+pub mod attention_map;
+
+#[cfg(feature = "core-gui")]
+pub fn launch_core_gui() {
+    dashboard::run_dashboard();
+}
+
+// TODO: Export submodules for dashboard, weights_viewer, kernel_profiler, attention_map, etc. 
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\gui\README.md ---
+# Core GUI/Visualization Module (bitnet-core/src/gui/)
+
+This module provides a developer-facing, core-level UI for visualizing and debugging model internals, kernel performance, and training progress in BitNet.
+
+## Purpose
+- Visualize model weights, activations, and attention maps
+- Profile and debug CPU/GPU kernel performance
+- Monitor real-time metrics and training progress
+- Facilitate rapid debugging and performance tuning during development and research
+
+## Dependencies
+- [egui](https://github.com/emilk/egui): Immediate mode GUI for Rust
+- [eframe](https://github.com/emilk/egui/tree/master/crates/eframe): Framework for building desktop apps with egui
+- [plotters](https://github.com/38/plotters): High-quality static plots (histograms, heatmaps, etc.)
+
+These are enabled via the `core-gui` feature flag in Cargo:
+
+```sh
+cargo run --features core-gui --example core_gui_dashboard
+```
+
+## Planned Features/Modules
+- `mod.rs`: Entry point for the core GUI/visualization module
+- `dashboard.rs`: Minimal dashboard for real-time metrics, kernel timings, and training progress
+- `weights_viewer.rs`: Visualize model weights, distributions, and quantization effects
+- `kernel_profiler.rs`: Interactive profiling and visualization of CPU/GPU kernel performance and correctness
+- `attention_map.rs`: Visualization of attention matrices and activations
+
+## Implementation Notes
+- Intended for advanced users, developers, and researchers
+- Uses `egui`, `eframe`, and `plotters` for visualization
+- All core GUI features are optional and gated behind the `core-gui` feature flag
+- The main application GUI (in bitnet-app) remains the user-facing interface; this core GUI is for internal development, debugging, and research 
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\gui\weights_viewer.rs ---
+// weights_viewer.rs
+// Visualize model weights, distributions, and quantization effects.
+
+#[cfg(feature = "core-gui")]
+pub fn show_weights_viewer(ui: &mut egui::Ui, weights: &[f32]) {
+    ui.label("Weights histogram (placeholder)");
+    // TODO: Use egui::plot or plotters for actual histogram/heatmap visualization.
+}
+
+// TODO: Implement weights viewer UI and logic. 
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\kernels\bitnet_kernel.wgsl ---
+// Optimized BitNet B1.58 Ternary Kernel for WGPU/Burn
+// Supports {-1, 0, +1} ternary weights with efficient packing and vectorization
+
+struct BitnetMetadata {
+    M: u32,           // Batch size
+    N: u32,           // Output features  
+    K: u32,           // Input features
+    K_packed: u32,    // K / 16 (since we pack 16 weights per u32)
+};
+
+@group(0) @binding(0) var<uniform> metadata: BitnetMetadata;
+@group(0) @binding(1) var<storage, read> activations: array<i8>;
+@group(0) @binding(2) var<storage, read> packed_weights: array<u32>;
+@group(0) @binding(3) var<storage, read> weight_scales: array<f32>;
+@group(0) @binding(4) var<storage, read> activation_scales: array<f32>; // Per-batch activation scales
+@group(0) @binding(5) var<storage, write> output: array<f32>;
+
+// Optimized tiling parameters for modern GPUs
+const TILE_DIM_M: u32 = 64u;   // Reduced for better occupancy
+const TILE_DIM_N: u32 = 64u;   
+const TILE_DIM_K: u32 = 32u;   // Increased K tile for better data reuse
+
+const THREAD_TILE_M: u32 = 4u; // Smaller thread tiles for better vectorization
+const THREAD_TILE_N: u32 = 4u;
+
+const WORKGROUP_SIZE_X: u32 = 16u; // TILE_DIM_N / THREAD_TILE_N
+const WORKGROUP_SIZE_Y: u32 = 16u; // TILE_DIM_M / THREAD_TILE_M
+
+// Shared memory with better alignment
+var<workgroup> tile_a: array<vec4<i8>, TILE_DIM_M * TILE_DIM_K / 4u>;  // Vectorized activations
+var<workgroup> tile_b: array<i32, TILE_DIM_K * TILE_DIM_N>;            // Decoded weights
+
+// Optimized ternary weight decoder with lookup table
+const DECODE_LUT: array<vec4<i32>, 64> = array<vec4<i32>, 64>(
+    // Pre-computed lookup table for faster 2-bit to ternary conversion
+    // Each entry maps 8 bits (4 x 2-bit values) to 4 ternary values
+    vec4<i32>(-1, -1, -1, -1), vec4<i32>(-1, -1, -1,  0), vec4<i32>(-1, -1, -1,  1), vec4<i32>(-1, -1, -1, -1), // 0x00-0x03
+    vec4<i32>(-1, -1,  0, -1), vec4<i32>(-1, -1,  0,  0), vec4<i32>(-1, -1,  0,  1), vec4<i32>(-1, -1,  0, -1), // 0x04-0x07
+    vec4<i32>(-1, -1,  1, -1), vec4<i32>(-1, -1,  1,  0), vec4<i32>(-1, -1,  1,  1), vec4<i32>(-1, -1,  1, -1), // 0x08-0x0B
+    vec4<i32>(-1, -1, -1, -1), vec4<i32>(-1, -1, -1,  0), vec4<i32>(-1, -1, -1,  1), vec4<i32>(-1, -1, -1, -1), // 0x0C-0x0F
+    // ... (continue pattern for all 64 entries)
+    // For brevity, showing pattern - full LUT would have all 64 combinations
+    vec4<i32>( 1,  1,  1, -1), vec4<i32>( 1,  1,  1,  0), vec4<i32>( 1,  1,  1,  1), vec4<i32>( 1,  1,  1, -1)  // 0x3C-0x3F
+);
+
+// Fast ternary decoder using SIMD and LUT
+fn decode_16x2bit_ternary(packed_val: u32) -> array<i32, 16> {
+    var decoded: array<i32, 16>;
+    
+    // Process 4 weights at a time using vectorized lookup
+    for (var i: u32 = 0u; i < 4u; i = i + 1u) {
+        let byte_val = (packed_val >> (i * 8u)) & 0xFFu;
+        let lut_result = DECODE_LUT[byte_val];
+        
+        decoded[i * 4u + 0u] = lut_result.x;
+        decoded[i * 4u + 1u] = lut_result.y;  
+        decoded[i * 4u + 2u] = lut_result.z;
+        decoded[i * 4u + 3u] = lut_result.w;
+    }
+    
+    return decoded;
+}
+
+// Vectorized dot product for better throughput
+fn dot_product_4x4(a: vec4<i32>, b: vec4<i32>) -> i32 {
+    return dot(a, b);
+}
+
+@compute @workgroup_size(WORKGROUP_SIZE_X, WORKGROUP_SIZE_Y, 1)
+fn main(
+    @builtin(workgroup_id) workgroup_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+    @builtin(local_invocation_index) local_index: u32
+) {
+    let thread_idx_m = local_id.y;
+    let thread_idx_n = local_id.x;
+    
+    let tile_start_m = workgroup_id.y * TILE_DIM_M;
+    let tile_start_n = workgroup_id.x * TILE_DIM_N;
+    
+    // Vectorized accumulators for better performance  
+    var accumulators: array<vec4<i32>, THREAD_TILE_M>;
+    for (var i = 0u; i < THREAD_TILE_M; i = i + 1u) {
+        accumulators[i] = vec4<i32>(0);
+    }
+    
+    // Main tiling loop with optimizations
+    let num_k_tiles = (metadata.K + TILE_DIM_K - 1u) / TILE_DIM_K;
+    
+    for (var k_tile_idx = 0u; k_tile_idx < num_k_tiles; k_tile_idx = k_tile_idx + 1u) {
+        let k_tile_start = k_tile_idx * TILE_DIM_K;
+        
+        // === Cooperative Loading with Coalescing ===
+        // Load activations with vectorization
+        let total_a_elements = TILE_DIM_M * TILE_DIM_K / 4u;
+        let loads_per_thread_a = (total_a_elements + 255u) / 256u; // Ceiling division
+        
+        for (var i = 0u; i < loads_per_thread_a; i = i + 1u) {
+            let load_idx = i * 256u + local_index;
+            if (load_idx < total_a_elements) {
+                let vec_idx = load_idx;
+                let flat_idx = load_idx * 4u;
+                let m = flat_idx / TILE_DIM_K;
+                let k = flat_idx % TILE_DIM_K;
+                
+                let global_m = tile_start_m + m;
+                let global_k = k_tile_start + k;
+                
+                if (global_m < metadata.M && global_k + 3u < metadata.K) {
+                    // Load 4 activations at once
+                    let base_addr = global_m * metadata.K + global_k;
+                    tile_a[vec_idx] = vec4<i8>(
+                        activations[base_addr],
+                        activations[base_addr + 1u],
+                        activations[base_addr + 2u], 
+                        activations[base_addr + 3u]
+                    );
+                } else {
+                    tile_a[vec_idx] = vec4<i8>(0);
+                }
+            }
+        }
+        
+        // Load and decode weights
+        let total_b_elements = TILE_DIM_N * TILE_DIM_K;
+        let loads_per_thread_b = (total_b_elements + 255u) / 256u;
+        
+        for (var i = 0u; i < loads_per_thread_b; i = i + 1u) {
+            let load_idx = i * 256u + local_index;
+            if (load_idx < total_b_elements && (load_idx % 16u) == 0u) {
+                let n = load_idx / TILE_DIM_K;
+                let k = load_idx % TILE_DIM_K;
+                
+                let global_n = tile_start_n + n;  
+                let global_k_packed_idx = (k_tile_start + k) / 16u;
+                
+                if (global_n < metadata.N && global_k_packed_idx < metadata.K_packed) {
+                    let weight_idx = global_n * metadata.K_packed + global_k_packed_idx;
+                    let packed_w = packed_weights[weight_idx];
+                    let decoded = decode_16x2bit_ternary(packed_w);
+                    
+                    // Store decoded weights
+                    for (var j = 0u; j < 16u; j = j + 1u) {
+                        tile_b[n * TILE_DIM_K + k + j] = decoded[j];
+                    }
+                } else {
+                    // Pad with zeros
+                    for (var j = 0u; j < 16u; j = j + 1u) {
+                        tile_b[n * TILE_DIM_K + k + j] = 0;
+                    }
+                }
+            }
+        }
+        
+        workgroupBarrier();
+        
+        // === Vectorized Computation ===
+        for (var k_inner = 0u; k_inner < TILE_DIM_K; k_inner = k_inner + 4u) {
+            // Load vectorized activations
+            var a_vecs: array<vec4<i32>, THREAD_TILE_M>;
+            for (var m = 0u; m < THREAD_TILE_M; m = m + 1u) {
+                let base_m = thread_idx_m * THREAD_TILE_M + m;
+                let vec_idx = (base_m * TILE_DIM_K + k_inner) / 4u;
+                let a_i8 = tile_a[vec_idx];
+                a_vecs[m] = vec4<i32>(i32(a_i8.x), i32(a_i8.y), i32(a_i8.z), i32(a_i8.w));
+            }
+            
+            // Load vectorized weights and compute
+            for (var n = 0u; n < THREAD_TILE_N; n = n + 1u) {
+                let base_n = thread_idx_n * THREAD_TILE_N + n;
+                let b_vec = vec4<i32>(
+                    tile_b[base_n * TILE_DIM_K + k_inner],
+                    tile_b[base_n * TILE_DIM_K + k_inner + 1u],
+                    tile_b[base_n * TILE_DIM_K + k_inner + 2u],
+                    tile_b[base_n * TILE_DIM_K + k_inner + 3u]
+                );
+                
+                // Vectorized multiply-accumulate
+                for (var m = 0u; m < THREAD_TILE_M; m = m + 1u) {
+                    let dot_result = dot_product_4x4(a_vecs[m], b_vec);
+                    accumulators[m][n] += dot_result;
+                }
+            }
+        }
+        
+        workgroupBarrier();
+    }
+    
+    // === Write Results with Proper Scaling ===
+    for (var m = 0u; m < THREAD_TILE_M; m = m + 1u) {
+        for (var n = 0u; n < THREAD_TILE_N; n = n + 1u) {
+            let global_m = tile_start_m + thread_idx_m * THREAD_TILE_M + m;
+            let global_n = tile_start_n + thread_idx_n * THREAD_TILE_N + n;
+            
+            if (global_m < metadata.M && global_n < metadata.N) {
+                // BitNet B1.58 scaling: result = activation_scale * weight_scale * dot_product
+                let activation_scale = activation_scales[global_m];
+                let weight_scale = weight_scales[global_n];
+                let final_result = f32(accumulators[m][n]) * activation_scale * weight_scale;
+                
+                output[global_m * metadata.N + global_n] = final_result;
+            }
+        }
+    }
+}
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\kernels\README.md ---
+﻿# BitNet Shaders
+
+This directory contains GPU compute shaders for BitNet, written in WGSL (WebGPU Shading Language).
+
+## Files
+- `bitnet_kernel.wgsl`: The primary GPU kernel for the decode-and-multiply strategy used in BitNet inference.
+
+## Purpose
+- Accelerate quantized matrix multiplication and other core operations on GPU hardware
+- Enable high-performance inference for large models
+
+## How to Use
+- The kernel is loaded and dispatched by the `bitnet-core` crate's `kernels/wgpu.rs` module
+- To modify the kernel, edit `bitnet_kernel.wgsl` and rebuild the project
+
+## Testing and Validation
+- Kernel correctness is validated against CPU and scalar implementations in the test suite
+- Performance tuning is iterative: start with correctness, then profile and optimize
+
+## Implementation Notes
+- WGSL is the shading language for WebGPU, supported on modern GPUs
+- See the project plan for details on kernel design and validation
+
+---
+
+# Reference: Official BitNet Kernels (Must Read Before Implementing)
+
+## GPU (CUDA) Kernels
+- **Files:**
+  - `References/gpu/bitnet_kernels/bitnet_kernels.cu`
+  - `References/gpu/bitnet_kernels/bitnet_kernels.h`
+
+### What They Do
+- Implement highly-optimized CUDA kernels for quantized matrix multiplication (int8 × int2), with hardcoded shapes (M, N, K) for maximum performance.
+- Use template metaprogramming and CUDA intrinsics for memory access, quantization, and reduction.
+- Entry point: `bitlinear_int8xint2` dispatches to specialized kernels based on matrix shape.
+
+### Key Concepts to Learn/Port
+- **Data Layout:** Inputs are packed/quantized, often in int2 or int8, and require decoding on the device.
+- **Shape Specialization:** Kernels are written for specific (M, N, K) shapes, not generic GEMM.
+- **Quantization:** Input weights are quantized, and scaling factors are used to recover floating-point results.
+- **Reduction:** Use of warp shuffles and shared memory for fast reductions.
+- **Launch Parameters:** Grid/block sizes are tuned for each shape.
+
+### If Implementing in Rust (with wgpu/wgsl):
+- **Data Upload:** You must pack/quantize your data on the Rust side, matching the layout expected by the kernel.
+- **Specialization:** Consider specializing your WGSL kernels for common shapes, or use dynamic branching for flexibility (at some performance cost).
+- **Decoding:** Implement int2/int8 decoding in WGSL. See the device-side decode logic in `bitnet_kernels.h`.
+- **Scaling:** Pass scaling factors as uniforms or buffers, and apply them after the dot product.
+- **Thread Layout:** Map CUDA thread/block logic to WGSL workgroups and invocations. Be aware of differences in synchronization and memory model.
+- **Testing:** Validate against the CPU reference (see below) for correctness.
+
+---
+
+## CPU (SIMD) Kernels
+- **Files:**
+  - `References/preset_kernels/bitnet_b1_58-3B/bitnet-lut-kernels-tl1.h` (ARM/NEON)
+  - `References/preset_kernels/bitnet_b1_58-3B/bitnet-lut-kernels-tl2.h` (x86/AVX2)
+  - (And similar files for other models in `preset_kernels/`)
+
+### What They Do
+- Provide highly-optimized CPU kernels for quantized matrix multiplication using SIMD intrinsics.
+- Implement quantization, LUT (lookup table) construction, and specialized GEMM for specific shapes.
+- Split by architecture (tl1 = ARM, tl2 = x86) and by model size.
+
+### Key Concepts to Learn/Port
+- **SIMD Quantization:** How to quantize weights and inputs efficiently using vector instructions.
+- **LUT Construction:** How to build lookup tables for fast int2/int8 operations.
+- **Shape Specialization:** As with GPU, kernels are specialized for certain shapes.
+- **Preprocessing:** Quantization and LUT construction are often done as a preprocessing step.
+
+### If Implementing in Rust:
+- **SIMD:** Use `std::arch` or crates like `packed_simd`/`wide` for SIMD operations. For fallback, provide scalar versions.
+- **FFI:** If you want to use the C/C++ kernels directly, use Rust's FFI (`bindgen`, `cc` crate) to call them.
+- **Data Layout:** Match the memory layout and quantization format used in the reference kernels.
+- **Testing:** Use the CPU kernels as a correctness reference for your GPU implementation.
+
+---
+
+## Concrete Steps for BitNet Kernel Development
+
+### 1. Study the Reference Kernels
+- Read the CUDA and CPU kernel files in detail. Take notes on:
+  - Data layout (how are int2/int8 packed? How are scales stored?)
+  - Kernel entry points and dispatch logic
+  - Quantization and dequantization math
+  - Thread/block/workgroup organization
+
+### 2. Decide on Your Target Shapes
+- Will you support only the common shapes (as in the reference), or make a general kernel?
+- Specialization gives better performance, but less flexibility.
+
+### 3. Plan Data Flow in Rust
+- **Quantize weights/inputs** on the Rust side, matching the reference layout.
+- **Upload data** to GPU buffers, ensuring alignment and packing match the kernel's expectations.
+- **Pass scaling factors** as uniforms or buffers.
+- **Dispatch kernels** with the correct workgroup sizes.
+
+### 4. Implement Decoding and GEMM in WGSL
+- Port the int2/int8 decode logic from CUDA/CPU to WGSL.
+- Implement the dot product and reduction logic, using WGSL's workgroup/shared memory features.
+- Apply scaling factors after accumulation.
+
+### 5. Validate and Benchmark
+- Compare GPU results to CPU reference for correctness.
+- Profile and tune workgroup sizes, memory access patterns, and specialization.
+
+### 6. Integration
+- Expose the kernel via Rust (e.g., in `bitnet-core/src/kernels/wgpu.rs`).
+- Provide a fallback to CPU if GPU is unavailable or for unsupported shapes.
+- Document all data formats and kernel expectations.
+
+---
+
+## Example: Data Packing and Kernel Call in Rust
+
+```rust
+// Example: Packing int2 weights in Rust
+fn pack_int2(weights: &[i8]) -> Vec<u8> {
+    let mut packed = Vec::with_capacity((weights.len() + 3) / 4);
+    for chunk in weights.chunks(4) {
+        let mut byte = 0u8;
+        for (i, &w) in chunk.iter().enumerate() {
+            let val = (w as u8) & 0x3; // 2 bits
+            byte |= val << (i * 2);
+        }
+        packed.push(byte);
+    }
+    packed
+}
+
+// Example: Dispatching a WGSL kernel with wgpu
+let bind_group = ...; // Set up with packed weights, input, scales
+let workgroup_count = ...; // Compute based on shape
+encoder.dispatch_workgroups(workgroup_count_x, workgroup_count_y, 1);
+```
+
+---
+
+## Further Reading & Next Steps
+- **Official BitNet kernels** are the best source for understanding the math and performance tricks.
+- **Rust GPU ecosystem:** See crates like `wgpu`, `naga`, and `bytemuck` for GPU programming and data layout.
+- **SIMD in Rust:** See `std::arch`, `wide`, or `packed_simd` for CPU-side vectorization.
+- **FFI:** If you want to use the C/C++ kernels directly, use `bindgen` and the `cc` crate.
+
+---
+
+## Summary Table
+
+| Task                | Where to Look                                              | What to Learn/Do                |
+|---------------------|-----------------------------------------------------------|---------------------------------|
+| GPU kernel (CUDA)   | `bitnet_kernels.cu`, `bitnet_kernels.h`                   | Data layout, quantization, GEMM |
+| CPU kernel (SIMD)   | `bitnet-lut-kernels-tl1.h`, `bitnet-lut-kernels-tl2.h`    | SIMD quantization, LUT, GEMM    |
+| Model-specific info | `preset_kernels/`                                         | Shape specialization            |
+
+---
+
+## Final Advice
+- **Don't reinvent the wheel:** The official BitNet kernels are highly optimized. Use them as your starting point.
+- **Document as you go:** Keep notes on data layout, kernel logic, and integration points.
+- **Prototype for correctness first, then optimize.**
+- **Share findings with the team:** This is a complex area—collaboration is key.
+
+---
+
+
+
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\kernels.rs ---
+use bytemuck::{Pod, Zeroable};
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct BitnetMetadata {
+    pub m: u32,        // Batch size
+    pub n: u32,        // Output features
+    pub k: u32,        // Input features  
+    pub k_packed: u32, // K / 16 for packed weights
+}
+
+// Utility: pack 16 ternary weights into a u32
+pub fn pack_ternary_weights(weights: &[i8]) -> Vec<u32> {
+    assert_eq!(weights.len() % 16, 0, "Weight count must be divisible by 16");
+    let mut packed = Vec::with_capacity(weights.len() / 16);
+    for chunk in weights.chunks(16) {
+        let mut packed_val = 0u32;
+        for (i, &weight) in chunk.iter().enumerate() {
+            let encoded = match weight {
+                -1 => 0u32,
+                0 => 1u32,
+                1 => 2u32,
+                _ => panic!("Invalid ternary weight: {}", weight),
+            };
+            packed_val |= encoded << (i * 2);
+        }
+        packed.push(packed_val);
+    }
+    packed
+}
+
+// Utility: calculate per-channel weight scales
+pub fn calculate_weight_scales(weights: &[Vec<i8>]) -> Vec<f32> {
+    weights.iter().map(|channel| {
+        let sum_abs: f32 = channel.iter().map(|&w| w.abs() as f32).sum();
+        let non_zero_count = channel.iter().filter(|&&w| w != 0).count() as f32;
+        if non_zero_count > 0.0 {
+            sum_abs / non_zero_count
+        } else {
+            1.0
+        }
+    }).collect()
+}
+
+
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\lib.rs ---
+//! bitnet-core: Core BitNet inference/training engine for Rust. Designed for use as a library in other projects.
+//!
+//! - All core logic for BitNet model, kernels, and quantization.
+//! - No CLI/GUI dependencies.
+//! - Includes utilities for loading weights from Hugging Face.
+//! - See project plan for module responsibilities.
+
+pub mod attention;
+pub mod embedding;
+pub mod feed_forward;
+pub mod kernels;
+pub mod model;
+pub mod op;
+pub mod rms_norm;
+pub mod settings;
+pub mod tokenizer;
+pub mod bitnet_linear;
+
+pub fn add(left: u64, right: u64) -> u64 {
+    left + right
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_works() {
+        let result = add(2, 2);
+        assert_eq!(result, 4);
+    }
+}
+
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\model.rs ---
+//! The main Transformer model architecture for BitNet, built with burn.
+
+use burn::{
+    prelude::*,
+    module::Module,
+    tensor::{
+        backend::Backend,
+        Tensor,
+        Float,
+        Int,
+    },
+    nn,
+};
+use crate::{
+    attention::{Attention, AttentionConfig},
+    embedding::{Embedding, EmbeddingConfig},
+    error::BitNetError,
+    feed_forward::{FeedForward, FeedForwardConfig},
+    rms_norm::{RmsNorm, RmsNormConfig},
+    tokenizer::Tokenizer,
+};
+
+// The main configuration for the entire Transformer model.
+// This will be deserialized from the `config.json` file.
+#[derive(Config, Debug, serde::Deserialize)]
+pub struct ModelConfig {
+    pub hidden_size: usize,
+    pub intermediate_size: usize,
+    pub num_hidden_layers: usize,
+    pub num_attention_heads: usize,
+    pub vocab_size: usize,
+    #[config(default = "1e-6")]
+    pub rms_norm_eps: f64,
+    #[config(default = "0.1")]
+    pub dropout: f64,
+}
+
+// A single Transformer block, composed of an attention layer and a feed-forward layer.
+// This is also a `burn` module.
+#[derive(Module, Debug)]
+pub struct TransformerBlock<B: Backend> {
+    attn: Attention<B>,
+    ffn: FeedForward<B>,
+    attn_norm: RmsNorm<B>,
+    ffn_norm: RmsNorm<B>,
+}
+
+impl<B: Backend> TransformerBlock<B> {
+    /// The forward pass for a single block.
+    /// Follows the standard pre-normalization architecture:
+    /// x = x + Attention(Norm(x))
+    /// x = x + FeedForward(Norm(x))
+    pub fn forward(&self, x: Tensor<B, 3, Float>) -> Tensor<B, 3, Float> {
+        let x = x.clone() + self.attn.forward(self.attn_norm.forward(x.clone()));
+        let x = x.clone() + self.ffn.forward(self.ffn_norm.forward(x.clone()));
+        x
+    }
+}
+
+// The main Transformer model module.
+#[derive(Module, Debug)]
+pub struct Transformer<B: Backend> {
+    embedding: Embedding<B>,
+    blocks: Vec<TransformerBlock<B>>,
+    norm: RmsNorm<B>,
+    // The final output layer is a standard linear layer, as it's not quantized.
+    output: nn::Linear<B>,
+}
+
+impl ModelConfig {
+    /// Initialize a complete Transformer model from this configuration.
+    pub fn init<B: Backend>(&self, device: &B::Device) -> Transformer<B> {
+        let attention_config = AttentionConfig::new(self.hidden_size, self.num_attention_heads)
+            .with_dropout(self.dropout);
+        let ffn_config = FeedForwardConfig::new(self.hidden_size, self.intermediate_size);
+        let norm_config = RmsNormConfig::new(self.hidden_size).with_epsilon(self.rms_norm_eps);
+        
+        let blocks = (0..self.num_hidden_layers)
+            .map(|_| TransformerBlock {
+                attn: attention_config.init(device),
+                ffn: ffn_config.init(device),
+                attn_norm: norm_config.init(device),
+                ffn_norm: norm_config.init(device),
+            })
+            .collect();
+        
+        Transformer {
+            embedding: EmbeddingConfig::new(self.vocab_size, self.hidden_size).init(device),
+            blocks,
+            norm: norm_config.init(device),
+            output: nn::LinearConfig::new(self.hidden_size, self.vocab_size)
+                .with_bias(false)
+                .init(device),
+        }
+    }
+}
+
+impl<B: Backend> Transformer<B> {
+    /// The main forward pass for the entire model.
+    pub fn forward(&self, x: Tensor<B, 2, Int>) -> Tensor<B, 3, Float> {
+        let [_batch_size, seq_len] = x.dims();
+        let mut x = self.embedding.forward(x);
+
+        for block in &self.blocks {
+            x = block.forward(x);
+        }
+
+        let x = self.norm.forward(x);
+
+        // We only want the logits for the last token in the sequence.
+        let x_last_token = x.clone().slice([0.._batch_size, seq_len-1..seq_len]);
+        let x_last_token = x_last_token.reshape([_batch_size, self.embedding.embedding.d_model]);
+        
+        self.output.forward(x_last_token).reshape([_batch_size, 1, -1])
+    }
+
+    /// Load a model from a directory containing `config.json` and pre-converted
+    /// `model.safetensors` with the BitNet weight format.
+    pub fn from_dir(dir: &str, device: &B::Device) -> Result<(Self, Tokenizer), BitNetError> {
+        // Load the model configuration
+        let config_path = format!("{}/config.json", dir);
+        let config_str = std::fs::read_to_string(config_path)?;
+        let config: ModelConfig = serde_json::from_str(&config_str)?;
+
+        // Initialize a model with random weights based on the config
+        let mut model = config.init(device);
+
+        // Load the pre-converted weights into the model
+        // burn's `load_file` automatically finds the correct tensors by name and
+        // populates the `Param` fields in our modules.
+        let model_path = format!("{}/model.safetensors", dir);
+        let record = nn::recorder::FullPrecisionSettings::default()
+            .load(&model_path.into(), device)?;
+        
+        model = model.load_record(record);
+
+        // Load the tokenizer
+        let tokenizer_path = format!("{}/tokenizer.json", dir);
+        let tokenizer = Tokenizer::from_file(&tokenizer_path)?;
+
+        Ok((model, tokenizer))
+    }
+}
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\op.rs ---
+//! The BitLinear layer implemented as a burn module.
+
+use burn::{
+    prelude::*,
+    module::{Module, Param},
+    tensor::{Int, Float, Tensor},
+};
+use crate::kernels; // Import our new kernels module
+
+// A configuration struct for creating a BitLinear layer.
+#[derive(Config)]
+pub struct BitLinearConfig {
+    pub in_features: usize,
+    pub out_features: usize,
+}
+
+// The BitLinear module. It holds its weights as `burn` Parameters.
+#[derive(Module, Debug)]
+pub struct BitLinear<B: Backend> {
+    // The weights are parameters, so burn can track them for saving, loading, etc.
+    // Weights are stored in the packed 2-bit format.
+    pub packed_weights: Param<Tensor<B, 2, Int>>,
+    // The scaling factors for dequantization.
+    pub weight_scales: Param<Tensor<B, 1, Float>>,
+    pub in_features: usize,
+    pub out_features: usize,
+}
+
+impl BitLinearConfig {
+    /// Initialize a new BitLinear layer.
+    pub fn init<B: Backend>(&self, device: &B::Device) -> BitLinear<B> {
+        // For now, we initialize with empty tensors.
+        // Later, we will load pre-converted weights into these tensors.
+        let packed_weights = Tensor::zeros([self.out_features, self.in_features / 16], device);
+        let weight_scales = Tensor::zeros([self.out_features], device);
+
+        BitLinear {
+            packed_weights: Param::new(packed_weights),
+            weight_scales: Param::new(weight_scales),
+            in_features: self.in_features,
+            out_features: self.out_features,
+        }
+    }
+}
+
+impl<B: Backend> BitLinear<B> {
+    /// The forward pass for the BitLinear layer.
+    pub fn forward(&self, input: Tensor<B, 2, Float>) -> Tensor<B, 2, Float> {
+        // TODO: This forward pass needs to handle batches.
+        // For now, we assume a batch size of 1 for simplicity.
+        let [_batch_size, _d_model] = input.dims();
+        let input_1d = input.reshape([-1]);
+
+        // 1. Online Activation Quantization
+        let (q_activations, activation_scale) = self.quantize_activations(input_1d);
+
+        // 2. Call our custom kernel
+        let output = kernels::bit_linear(
+            q_activations,
+            activation_scale,
+            self.packed_weights.val(), // .val() gets the Tensor from the Param
+            self.weight_scales.val(),
+        );
+
+        // Reshape the output back to the original batch dimension
+        output.reshape([_batch_size, self.out_features])
+    }
+
+    /// Quantizes the input activation tensor.
+    fn quantize_activations(&self, input: Tensor<B, 1, Float>) -> (Tensor<B, 1, Int>, f32) {
+        // This logic mirrors the scalar version but uses burn's tensor operations.
+        let abs_max = input.abs().max().into_scalar();
+        let scale = 127.0 / (abs_max + 1e-5);
+        
+        // Burn's `int` cast automatically rounds towards zero, which is what we want.
+        let q_input = input.mul_scalar(scale).int().clamp(-128, 127);
+        
+        // We pack the i8 activations into i32 for the kernel.
+        let q_input_i32 = B::int_from_data(q_input.to_data().convert(), &input.device());
+        let q_input_packed = q_input_i32.reshape([-1, 4]).sum_dim(1); // This is a trick to pack
+
+        (q_input_packed, 1.0 / scale)
+    }
+}
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\rms_norm.rs ---
+//! RMSNorm implementation for BitNet, using burn's native module.
+
+use burn::{
+    prelude::*,
+    module::Module,
+    tensor::{
+        backend::Backend,
+        Tensor,
+        Float,
+    },
+    // We will use burn's built-in RMSNorm module.
+    nn,
+};
+
+// Configuration for the RmsNorm module.
+#[derive(Config)]
+pub struct RmsNormConfig {
+    /// The dimension of the input tensor.
+    pub d_model: usize,
+    /// A small epsilon value for numerical stability.
+    #[config(default = "1e-6")]
+    pub epsilon: f64,
+}
+
+/// The RmsNorm module.
+/// This is a simple wrapper around burn's nn::RmsNorm.
+#[derive(Module, Debug)]
+pub struct RmsNorm<B: Backend> {
+    // The underlying RMSNorm layer from the burn framework.
+    norm: nn::RmsNorm<B>,
+}
+
+impl RmsNormConfig {
+    /// Initialize a new RmsNorm module.
+    pub fn init<B: Backend>(&self, device: &B::Device) -> RmsNorm<B> {
+        RmsNorm {
+            norm: nn::RmsNormConfig::new(self.d_model)
+                .with_epsilon(self.epsilon)
+                .init(device),
+        }
+    }
+}
+
+impl<B: Backend> RmsNorm<B> {
+    /// The forward pass for RMS normalization.
+    pub fn forward<const D: usize>(&self, x: Tensor<B, D, Float>) -> Tensor<B, D, Float> {
+        self.norm.forward(x)
+    }
+}
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\settings.rs ---
+#[derive(Debug, Clone)]
+pub struct InferenceSettings {
+    // Core Sampling
+    pub temperature: f64,
+    pub top_p: f64,
+    pub top_k: usize,
+    pub do_sample: bool,
+
+    // Generation Constraints
+    pub max_new_tokens: usize,
+    pub max_length: usize, // Global safety limit
+    pub min_length: usize,
+    pub min_new_tokens: usize,
+    pub batch_size: usize,
+    pub num_return_sequences: usize,
+    pub num_beams: usize,
+    pub num_beam_groups: usize,
+    pub early_stopping: bool,
+    pub length_penalty: f32,
+    pub diversity_penalty: f32,
+    pub no_repeat_ngram_size: usize,
+    pub repetition_penalty: f32,
+    pub penalty_alpha: f32,
+    pub threads: usize,
+    pub use_cache: bool,
+    pub attention_mask: bool,
+    pub output_attentions: bool,
+    pub output_hidden_states: bool,
+    pub output_scores: bool,
+    pub remove_invalid_values: bool,
+    pub return_dict_in_generate: bool,
+    pub max_time: Option<f32>,
+    pub prefix: Option<String>,
+    pub system_prompt: String,
+    pub seed: u64,
+    // Token control
+    pub eos_token_id: Option<u32>,
+    pub bos_token_id: Option<u32>,
+    pub pad_token_id: Option<u32>,
+    pub decoder_start_token_id: Option<u32>,
+    pub forced_bos_token_id: Option<u32>,
+    pub forced_eos_token_id: Option<u32>,
+    pub bad_words_ids: Option<Vec<Vec<u32>>>,
+    pub suppress_tokens: Option<Vec<u32>>,
+}
+
+impl Default for InferenceSettings {
+    fn default() -> Self {
+        Self {
+            temperature: 0.7,
+            max_length: 4096,
+            max_new_tokens: 512,
+            min_length: 0,
+            min_new_tokens: 0,
+            top_k: 50,
+            top_p: 0.9,
+            repetition_penalty: 1.1,
+            attention_mask: true,
+            batch_size: 1,
+            do_sample: true,
+            eos_token_id: None,
+            num_beams: 1,
+            num_return_sequences: 1,
+            pad_token_id: None,
+            diversity_penalty: 0.0,
+            early_stopping: false,
+            length_penalty: 1.0,
+            no_repeat_ngram_size: 0,
+            num_beam_groups: 1,
+            threads: 2,
+            bad_words_ids: None,
+            bos_token_id: None,
+            decoder_start_token_id: None,
+            forced_bos_token_id: None,
+            forced_eos_token_id: None,
+            max_time: None,
+            output_attentions: false,
+            output_hidden_states: false,
+            output_scores: false,
+            penalty_alpha: 0.0,
+            prefix: None,
+            remove_invalid_values: false,
+            return_dict_in_generate: false,
+            suppress_tokens: None,
+            use_cache: true,
+            system_prompt: "You are a helpful AI assistant.\nAlways provide clear, concise, and accurate answers.\nIf you are unsure, say so honestly.\nBe friendly, professional, and supportive.\nFormat lists and steps with bullet points when helpful.\nIf the user asks for code, provide well-commented examples.\nIf the user asks for advice, consider pros and cons.\nNever include harmful, unethical, or illegal content.\nIf the user asks for a summary, keep it brief and focused.\nIf the user asks for a translation, be accurate and note the language.\nIf the user asks for a joke, keep it light and appropriate.\n".to_string(),
+            seed: 42,
+        }
+    }
+} 
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\tokenizer.rs ---
+//! Tokenizer wrapper and chat format logic for BitNet.
+
+use crate::error::BitNetError;
+use tokenizers::Tokenizer as HfTokenizer;
+
+// Represents a message in a conversation.
+pub struct ChatMessage {
+    pub role: Role,
+    pub content: String,
+}
+
+// Defines the possible roles in a conversation.
+pub enum Role {
+    System,
+    User,
+    Assistant,
+}
+
+pub struct Tokenizer {
+    pub inner: HfTokenizer,
+}
+
+impl Tokenizer {
+    /// Load a tokenizer from a file path (e.g., ".../tokenizer.json").
+    pub fn from_file(path: &str) -> Result<Self, BitNetError> {
+        let inner = HfTokenizer::from_file(path)
+            .map_err(|e| BitNetError::Config(format!("Failed to load tokenizer: {}", e)))?;
+        Ok(Self { inner })
+    }
+
+    /// Decode a slice of token IDs back into a string.
+    pub fn decode(&self, ids: &[u32]) -> Result<String, BitNetError> {
+        self.inner.decode(ids, true)
+            .map_err(|e| BitNetError::Config(format!("Failed to decode tokens: {}", e)))
+    }
+
+    /// Encode a single string of text into token IDs.
+    pub fn encode(&self, text: &str) -> Result<Vec<u32>, BitNetError> {
+        let encoding = self.inner.encode(text, true)
+            .map_err(|e| BitNetError::Config(format!("Failed to encode text: {}", e)))?;
+        Ok(encoding.get_ids().to_vec())
+    }
+
+    /// A simple chat formatter.
+    /// In a real application, this would use a more complex chat template.
+    pub fn encode_chat(&self, messages: &[ChatMessage]) -> Result<Vec<u32>, BitNetError> {
+        let mut prompt = String::new();
+        for message in messages {
+            let role_str = match message.role {
+                Role::System => "[SYSTEM]",
+                Role::User => "[USER]",
+                Role::Assistant => "[ASSISTANT]",
+            };
+            prompt.push_str(&format!("{} {}\n", role_str, message.content));
+        }
+        self.encode(&prompt)
+    }
+}
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\training.rs ---
+// training.rs
+// Planned: Training loop, optimizer, scheduler, and checkpointing logic for BitNet models.
+
+// TODO: Implement training loop, optimizer, scheduler, and checkpointing. 
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\src\visualization.rs ---
+// visualization.rs
+// Planned: Logging, metrics, and visualization hooks for BitNet models.
+
+// TODO: Implement logging, metrics, and visualization hooks for model internals, training, and inference. 
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\tests\kernel_tests.rs ---
+use burn::{
+    prelude::*,
+    backend::wgpu::{Wgpu, WgpuDevice},
+    tensor::{Int, Float, Tensor, TensorData},
+};
+use burn_wgpu::graphics::AutoGraphicsApi;
+use burn_wgpu::{kernel::{self}, compute::WgpuHandle, WgpuElement, FloatElement, IntElement};
+use derive_new::new;
+use bitnet_core::kernels::{BitnetKernel, BitnetMetadata, pack_ternary_weights, calculate_weight_scales};
+use burn::kernel::{self, kernel_wgsl};
+use bitnet_core::bitnet_linear::{BitnetLinear, BitnetModelBuilder, BitnetModel};
+
+// --- Scalar reference logic (unchanged and correct) ---
+
+fn quantize_activations_scalar(activations: &[f32]) -> (Vec<i8>, f32) {
+    let abs_max = activations.iter().map(|&x| x.abs()).fold(f32::NEG_INFINITY, f32::max);
+    let scale = 127.0 / abs_max.max(1e-5);
+    (
+        activations.iter().map(|&x| (x * scale).round().clamp(-128.0, 127.0) as i8).collect(),
+        1.0 / scale
+    )
+}
+fn pack_weights_scalar(weights_i8: &[i8], n: usize, k: usize) -> (Vec<u32>, Vec<f32>) {
+    let weight_scales = vec![1.0; n];
+    let weights_u8: Vec<u8> = weights_i8.iter().map(|&x| (x + 2) as u8).collect();
+    let mut permuted_weights = vec![0u8; n * k];
+    let wmma_n = 16; let wmma_k = 32;
+    for block_n in 0..(n / wmma_n) { for block_k in 0..(k / wmma_k) {
+        for i in 0..wmma_n { for j in 0..wmma_k {
+            let thread_id = i * 2 + j / 16;
+            let row = (thread_id / 16) * 8 + (thread_id % 8);
+            let col = (j % 16) + 16 * ((thread_id % 16) / 8);
+            permuted_weights[(block_n*wmma_n+i)*k + (block_k*wmma_k+j)] = weights_u8[(block_n*wmma_n+row)*k + (block_k*wmma_k+col)];
+        }}
+    }}
+    let mut compressed_weights = Vec::with_capacity(n*k/4);
+    for chunk in permuted_weights.chunks_exact(4) {
+        let byte = (chunk[0] & 3) | ((chunk[1] & 3) << 2) | ((chunk[2] & 3) << 4) | ((chunk[3] & 3) << 6);
+        compressed_weights.push(byte);
+    }
+    let mut final_packed_weights = Vec::with_capacity(n * k / 16);
+    for chunk in compressed_weights.chunks_exact(4) {
+        let mut packed_u32 = 0u32;
+        for i in 0..4 { for j in 0..4 {
+            let offset = i*4+j; let shift_src = j*2; let two_bit_val = (chunk[i] >> shift_src) & 3;
+            let shift_dst = (offset % 4) * 8 + (offset / 4) * 2;
+            packed_u32 |= (two_bit_val as u32) << shift_dst;
+        }}
+        final_packed_weights.push(packed_u32);
+    }
+    (final_packed_weights, weight_scales)
+}
+fn matmul_quantized_scalar_reference(
+    q_acts: &[i8], p_weights: &[u32], act_scale: f32, w_scales: &[f32], n: usize, k: usize
+) -> Vec<f32> {
+    let mut out = vec![0.0f32; n];
+    for i in 0..n {
+        let mut acc: i32 = 0;
+        for k_step in 0..(k / 16) {
+            let k_base = k_step*16; let weight_idx = i*(k/16)+k_step;
+            let packed_w = p_weights[weight_idx];
+            let map = [0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15];
+            let mut d_w = [0i32;16];
+            for j in 0..16 { d_w[j] = (((packed_w >> (map[j]*2)) & 3) as i32) - 2; }
+            for j in 0..16 { acc += (q_acts[k_base+j] as i32) * d_w[j]; }
+        }
+        out[i] = (acc as f32) * act_scale * w_scales[i];
+    }
+    out
+}
+fn assert_vec_eq(a: &[f32], b: &[f32]) {
+    a.iter().zip(b.iter()).enumerate().for_each(|(i, (x, y))| {
+        assert!((x - y).abs() < 1e-4, "Mismatch at index {}: left={}, right={}", i, x, y);
+    });
+}
+
+
+fn bit_linear<B: Backend>(
+    activations: Tensor<B, 1, Int>,
+    activation_scale: f32,
+    packed_weights: Tensor<B, 2, Int>,
+    weight_scales: Tensor<B, 1, Float>,
+) -> Tensor<B, 1, Float> {
+    let n = packed_weights.dims()[0];
+    let k = packed_weights.dims()[1] * 16;
+    let device = activations.device();
+
+    let output = Tensor::<B, 1, Float>::empty([n], &device);
+
+    let metadata = BitnetMetadata::new(n as u32, k as u32, activation_scale, 0);
+    
+    // Launch the kernel by calling the generated struct.
+    let kernel = BitLinearRaw::<B::Elem, B::IntElem>::new();
+    B::execute(
+        kernel,
+        &[
+            activations.into_primitive(),
+            packed_weights.into_primitive(),
+            weight_scales.into_primitive(),
+        ],
+        &[output.clone().into_primitive()],
+        Some(&metadata.to_bytes()), // Pass metadata as bytes
+    );
+
+    output
+}
+
+#[test]
+fn test_burn_wgpu_kernel_correctness() {
+    type TestBackend = Wgpu<AutoGraphicsApi, f32, i32>;
+    let device = WgpuDevice::default();
+
+    let n = 128; let k = 256;
+
+    let mut weights_i8 = vec![0i8; n*k];
+    let mut acts_f32 = vec![0.0f32; k];
+    for i in 0..(n*k) { weights_i8[i] = (i % 3 - 1) as i8; }
+    for i in 0..k { acts_f32[i] = (i as f32 * 0.1) - ((k as f32 * 0.1) / 2.0); }
+
+    let (q_acts, act_scale) = quantize_activations_scalar(&acts_f32);
+    let (p_weights, w_scales) = pack_weights_scalar(&weights_i8, n, k);
+    let expected_output = matmul_quantized_scalar_reference(&q_acts, &p_weights, act_scale, &w_scales, n, k);
+    
+    let q_acts_i32: Vec<i32> = q_acts.chunks(4).map(|c| i32::from_le_bytes([c[0] as u8, c[1] as u8, c[2] as u8, c[3] as u8])).collect();
+    
+    let activations_tensor = Tensor::<TestBackend, 1, Int>::from_data(Data::new(q_acts_i32, [k / 4].into()), &device);
+    let packed_weights_tensor = Tensor::<TestBackend, 2, Int>::from_data(Data::new(p_weights, [n, k / 16].into()), &device);
+    let weight_scales_tensor = Tensor::<TestBackend, 1>::from_data(Data::new(w_scales, [n].into()), &device);
+
+    let gpu_output_tensor = bit_linear(
+        activations_tensor,
+        act_scale,
+        packed_weights_tensor,
+        weight_scales_tensor,
+    );
+    
+    let gpu_output = gpu_output_tensor.into_data().value;
+
+    println!("Comparing Burn/WGPU output with scalar reference...");
+    assert_vec_eq(&gpu_output, &expected_output);
+    println!("\nSUCCESS! The custom WGSL kernel produced the correct output.");
+}
+
+#[test]
+fn test_pack_ternary_weights() {
+    let weights = vec![-1, 0, 1, -1, 0, 1, -1, 0, 1, -1, 0, 1, -1, 0, 1, -1];
+    let packed = pack_ternary_weights(&weights);
+    assert_eq!(packed.len(), 1);
+    // Add more assertions for correctness if needed
+}
+
+#[test]
+fn test_calculate_weight_scales() {
+    let weights = vec![
+        vec![-1, 0, 1, 1, 0, -1, 1, 0],
+        vec![0, 0, 0, 0, 0, 0, 0, 0],
+    ];
+    let scales = calculate_weight_scales(&weights);
+    assert_eq!(scales.len(), 2);
+    // Add more assertions for correctness if needed
+}
+
+#[test]
+fn test_bitnet_layer() {
+    let device = WgpuDevice::default();
+    let in_features = 128;
+    let out_features = 64;
+    let batch_size = 4;
+
+    let ternary_weights: Vec<Vec<i8>> = (0..out_features)
+        .map(|_| vec![1; in_features])
+        .collect();
+
+    let model = BitnetModelBuilder::new(device.clone())
+        .add_linear_layer(ternary_weights, in_features, out_features)
+        .build();
+
+    let input = Tensor::random([batch_size, in_features], burn::tensor::Distribution::Default, &device);
+    let output = model.forward(input);
+
+    assert_eq!(output.dims(), [batch_size, out_features]);
+}
+
+// Placeholder for kernel launch test
+#[test]
+fn test_bitnet_kernel_launch() {
+    // TODO: Implement kernel launch and output validation
+    // This will require device setup and tensor preparation
+    assert!(true);
+}
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-core\tests\validation.rs ---
+use bitnet_core::model::Transformer;
+use bitnet_core::settings::InferenceSettings;
+
+#[test]
+fn test_model_loading_and_generate() {
+    // NOTE: Update this path to point to a real model directory for actual testing
+    let model_dir = "./testdata/model";
+    let model = Transformer::load_from_dir(model_dir);
+    assert!(model.is_ok(), "Model failed to load");
+    let model = model.unwrap();
+    let settings = InferenceSettings::default();
+    let output = model.generate("Hello, world!", &settings);
+    println!("Output: {:?}", output);
+} 

@@ -1,0 +1,989 @@
+bitnet-converter/
+└── bitnet-converter
+    ├── Cargo.toml
+    ├── README.md
+    ├── src
+    │   ├── lib.rs
+    │   ├── main.rs
+    │   ├── packer.rs
+    │   └── source.rs
+    └── tests
+        └── serialization_test.rs
+
+
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-converter\Cargo.toml ---
+[package]
+name = "bitnet-converter"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "bitnet_converter"
+path = "src/lib.rs"
+
+[dependencies]
+bitnet-tools = { path = "../bitnet-tools" }
+burn = { workspace = true }
+bincode = { workspace = true }
+clap = { workspace = true }
+indicatif = { workspace = true }
+safetensors = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+tracing = { workspace = true }
+memmap2 = "0.9.4"
+
+# Add dependencies needed for BF16 conversion
+bytemuck = { workspace = true }
+half = { workspace = true }
+tempfile = "3.10.1"
+serde = { version = "1.0", features = ["derive"] }
+simplelog = "0.12"
+chrono = "0.4"
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-converter\README.md ---
+# BitNet Converter (bitnet-converter)
+
+This crate provides a command-line tool for converting standard model weights into the optimized, quantized format required by the BitNet engine.
+
+## Purpose
+- Convert model weights from common formats (e.g., Hugging Face, PyTorch) to BitNet's custom format
+- Apply quantization, permutation, packing, and interleaving steps
+- Ensure compatibility and performance for BitNet inference
+
+## Features
+- CLI for running the full conversion pipeline
+- Modular packer and source modules for extensibility
+- Integration with Hugging Face download utilities
+
+## How to Use
+```sh
+cargo run -p bitnet-converter -- <args>
+```
+
+## Directory Structure
+- `src/main.rs`: CLI entry point
+- `src/packer.rs`: Core logic for the weight conversion pipeline
+- `src/source.rs`: Logic for loading weights from different source formats
+
+## Implementation Notes
+- Designed for extensibility to support new formats and quantization schemes
+- See the project plan for details on the conversion pipeline 
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-converter\src\lib.rs ---
+pub mod packer;
+pub mod source; 
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-converter\src\main.rs ---
+// File: E:\Desktop\Bitnet rs\crates\bitnet-converter\src\main.rs
+
+//! CLI entry point for the BitNet weight conversion tool.
+
+use bitnet_converter::{
+    packer::{self, record::BitNetModelRecord},
+    source::{self, TensorMap},
+};
+use burn::{
+    backend::NdArray,
+    record::{FullPrecisionSettings, NamedMpkFileRecorder, Recorder},
+    module::Module,
+};
+use clap::Parser;
+use serde::Deserialize;
+use bitnet_tools::constants::{MODELS_ROOT, ORIGINAL_DIR, CONVERTED_DIR};
+use simplelog::*;
+use std::fs::File;
+use std::panic;
+use chrono::Local;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about = "A tool to convert BitNet models to the burn-compatible format.")]
+struct Args {
+    /// Path to the directory containing the source model files (e.g., model.safetensors, config.json).
+    #[arg(short, long)]
+    input_dir: Option<String>,
+
+    /// Path to the directory where the converted model files will be saved.
+    #[arg(short, long)]
+    output_dir: Option<String>,
+}
+
+// A struct to deserialize only the necessary fields from config.json.
+#[derive(Deserialize)]
+struct PartialConfig {
+    num_hidden_layers: usize,
+}
+
+fn run_conversion(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    // Compute default input/output paths if not provided
+    let default_model_subdir = "microsoft/bitnet-b1.58-2B-4T-bf16";
+    let input_path = std::path::PathBuf::from(args.input_dir.unwrap_or_else(|| {
+        format!("{}/{}/{}", MODELS_ROOT, ORIGINAL_DIR, default_model_subdir)
+    }));
+    let output_path = std::path::PathBuf::from(args.output_dir.unwrap_or_else(|| {
+        format!("{}/{}/{}", MODELS_ROOT, CONVERTED_DIR, default_model_subdir)
+    }));
+
+    // Ensure the output directory exists.
+    std::fs::create_dir_all(&output_path)?;
+
+    // 1. Load config.json to get the number of layers.
+    log::info!("Loading config from {}...", input_path.join("config.json").display());
+    let config_str = std::fs::read_to_string(input_path.join("config.json"))?;
+    let config: PartialConfig = serde_json::from_str(&config_str)?;
+    log::info!("Model has {} layers.", config.num_hidden_layers);
+
+    // 2. Load the source tensors.
+    log::info!("Loading source tensors from {}...", input_path.join("model.safetensors").display());
+    let source = source::ModelSource::SafetensorsFile(
+        input_path.join("model.safetensors").to_str().unwrap().to_string(),
+    );
+    let tensor_map: TensorMap = source.load_tensors()?;
+    log::info!("Loaded {} tensors.", tensor_map.len());
+
+    // 3. Convert the model to our serializable record format.
+    log::info!("\nStarting conversion process...");
+    
+    // --- Robust Conversion with Panic Hook ---
+    // This will catch panics (from .unwrap()) and provide a clean error.
+    let conversion_result = panic::catch_unwind(|| {
+        packer::convert_model(tensor_map, config.num_hidden_layers)
+    });
+
+    let converted_record: BitNetModelRecord<NdArray> = match conversion_result {
+        Ok(record) => {
+            log::info!("Conversion complete.");
+            record
+        },
+        Err(e) => {
+            let cause = e.downcast_ref::<&str>().unwrap_or(&"Could not get panic cause");
+            let message = format!(
+                "A critical error occurred during model conversion: '{}'. \
+                This is likely due to a missing tensor in the source file or an unexpected tensor format. \
+                Please check the source model and the converter's packer logic.",
+                cause
+            );
+            return Err(message.into());
+        }
+    };
+    // --- End of Robust Conversion ---
+
+    // 4. Save the converted model using the streaming-friendly approach.
+    log::info!("\nSaving converted model to {}...", output_path.display());
+    let recorder = NamedMpkFileRecorder::<FullPrecisionSettings>::new();
+
+    // Save each block and top-level module to its own file.
+    recorder.record(
+        converted_record.embedding.into_record(),
+        output_path.join("embedding.mpk"),
+    )?;
+    recorder.record(
+        converted_record.norm.into_record(),
+        output_path.join("norm.mpk"),
+    )?;
+    recorder.record(
+        converted_record.lm_head.into_record(),
+        output_path.join("lm_head.mpk"),
+    )?;
+
+    for (i, block) in converted_record.blocks.into_iter().enumerate() {
+        recorder.record(
+            block.into_record(),
+            output_path.join(format!("block_{}.mpk", i)),
+        )?;
+    }
+
+    log::info!("\n✅ Conversion successful!");
+    log::info!("Converted model saved in: {}", output_path.display());
+    Ok(())
+}
+
+fn main() {
+    // Create logs directory if it doesn't exist
+    std::fs::create_dir_all("logs").ok();
+
+    // Create a timestamped log file with .txt extension
+    let log_file = format!("logs/bitnet-converter-{}.txt", Local::now().format("%Y%m%d-%H%M%S"));
+    CombinedLogger::init(vec![
+        TermLogger::new(LevelFilter::Info, Config::default(), TerminalMode::Mixed, ColorChoice::Auto),
+        WriteLogger::new(LevelFilter::Debug, Config::default(), File::create(&log_file).unwrap()),
+    ]).unwrap();
+
+    log::info!("BitNet Converter started. Log file: {}", log_file);
+
+    let args = Args::parse();
+    if let Err(e) = run_conversion(args) {
+        log::error!("Error during conversion: {}", e);
+        eprintln!("\n❌ Error during conversion: {}", e);
+        std::process::exit(1);
+    }
+}
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-converter\src\packer.rs ---
+// File: E:\Desktop\Bitnet rs\crates\bitnet-converter\src/packer.rs
+// --- FULL REPLACEMENT ---
+
+use burn::{
+    backend::NdArray,
+    backend::ndarray::NdArrayDevice,
+    module::{Module, Param},
+    prelude::*,
+    record::Record,
+    tensor::TensorData,
+};
+use crate::source::TensorMap;
+
+// =================================================================================================
+// Phase 1, Step 1: Define a Type-Safe Model Record for Serialization
+// =================================================================================================
+
+pub mod record {
+    use super::*;
+
+    // A serializable record for a single quantized linear layer.
+    #[derive(Module, Debug, Record)]
+    pub struct BitLinearRecord<B: Backend> {
+        // NOTE: This is `Tensor<B, 2, Float>` to satisfy the serializer,
+        // but it CONTAINS i32 bit data. This is the key "integer-as-float" pattern.
+        pub packed_weights: Param<Tensor<B, 2>>,
+        pub weight_scales: Param<Tensor<B, 1>>,
+    }
+    impl<B: Backend> Default for BitLinearRecord<B> {
+        fn default() -> Self {
+            let device = B::Device::default();
+            Self {
+                packed_weights: Param::from_tensor(Tensor::<B, 2>::zeros([1, 1], &device)),
+                weight_scales: Param::from_tensor(Tensor::<B, 1>::zeros([1], &device)),
+            }
+        }
+    }
+
+    // A serializable record for an RMSNorm layer.
+    #[derive(Module, Debug, Record)]
+    pub struct RmsNormRecord<B: Backend> {
+        pub weight: Param<Tensor<B, 1>>,
+    }
+    impl<B: Backend> Default for RmsNormRecord<B> {
+        fn default() -> Self {
+            let device = B::Device::default();
+            Self {
+                weight: Param::from_tensor(Tensor::<B, 1>::zeros([1], &device)),
+            }
+        }
+    }
+
+    // A serializable record for the embedding layer.
+    #[derive(Module, Debug, Record)]
+    pub struct EmbeddingRecord<B: Backend> {
+        pub weight: Param<Tensor<B, 2>>,
+    }
+    impl<B: Backend> Default for EmbeddingRecord<B> {
+        fn default() -> Self {
+            let device = B::Device::default();
+            Self {
+                weight: Param::from_tensor(Tensor::<B, 2>::zeros([1, 1], &device)),
+            }
+        }
+    }
+
+    // A serializable record for an Attention block.
+    #[derive(Module, Debug, Record, Default)]
+    pub struct AttentionRecord<B: Backend> {
+        pub wqkv: BitLinearRecord<B>,
+        pub o_proj: BitLinearRecord<B>,
+    }
+
+    // A serializable record for a FeedForward block.
+    #[derive(Module, Debug, Record, Default)]
+    pub struct FeedForwardRecord<B: Backend> {
+        pub w13: BitLinearRecord<B>,
+        pub w2: BitLinearRecord<B>,
+    }
+
+    // A serializable record for a full Transformer block.
+    #[derive(Module, Debug, Record, Default)]
+    pub struct TransformerBlockRecord<B: Backend> {
+        pub attention: AttentionRecord<B>,
+        pub feed_forward: FeedForwardRecord<B>,
+        pub attention_norm: RmsNormRecord<B>,
+        pub ffn_norm: RmsNormRecord<B>,
+    }
+
+    // The top-level record for the entire converted model.
+    #[derive(Module, Debug, Record, Default)]
+    pub struct BitNetModelRecord<B: Backend> {
+        pub embedding: EmbeddingRecord<B>,
+        pub blocks: Vec<TransformerBlockRecord<B>>,
+        pub norm: RmsNormRecord<B>,
+        pub lm_head: EmbeddingRecord<B>, // Using EmbeddingRecord as lm_head is also just a weight matrix
+    }
+}
+
+
+// =================================================================================================
+// Phase 1, Step 2: Refactor Packer Logic to Build the Type-Safe Record
+// =================================================================================================
+
+/// Processes an entire map of tensors, converting it into a structured, serializable model record.
+pub fn convert_model(
+    mut tensor_map: TensorMap,
+    num_layers: usize,
+) -> record::BitNetModelRecord<NdArray> {
+    let device = NdArrayDevice::default();
+    let mut model_record = record::BitNetModelRecord::default();
+
+    // 1. Handle non-quantized, top-level layers
+    if let Some(embedding) = tensor_map.remove("model.embed_tokens.weight") {
+        model_record.embedding.weight = Param::from_tensor(embedding);
+    }
+    if let Some(final_norm) = tensor_map.remove("model.norm.weight") {
+        // Accept [1, N] or [N, 1] or [N] and reshape to [N]
+        let shape = final_norm.dims();
+        let n: usize = shape.iter().copied().product();
+        model_record.norm.weight = Param::from_tensor(final_norm.reshape([n as i32]));
+    }
+    if let Some(lm_head) = tensor_map.remove("lm_head.weight") {
+        model_record.lm_head.weight = Param::from_tensor(lm_head);
+    } else if let Some(output) = tensor_map.remove("output.weight") { // Alternative name
+        model_record.lm_head.weight = Param::from_tensor(output);
+    }
+
+    // Debug: Print all available tensor keys before processing layers
+    println!("Available tensor keys before layer processing:");
+    for key in tensor_map.keys() {
+        println!("{}", key);
+    }
+
+    // 2. Process each Transformer Layer
+    for i in 0..num_layers {
+        println!("Processing layer {}...", i);
+        let mut block_record = record::TransformerBlockRecord::default();
+
+        // Attention QKV
+        let q_key = format!("model.layers.{}.self_attn.q_proj.weight", i);
+        let k_key = format!("model.layers.{}.self_attn.k_proj.weight", i);
+        let v_key = format!("model.layers.{}.self_attn.v_proj.weight", i);
+        let o_key = format!("model.layers.{}.self_attn.o_proj.weight", i);
+        let gate_key = format!("model.layers.{}.mlp.gate_proj.weight", i);
+        let up_key = format!("model.layers.{}.mlp.up_proj.weight", i);
+        let down_key = format!("model.layers.{}.mlp.down_proj.weight", i);
+        let attn_norm_key = format!("model.layers.{}.input_layernorm.weight", i);
+        let ffn_norm_key = format!("model.layers.{}.post_attention_layernorm.weight", i);
+
+        let q = tensor_map.remove(&q_key).unwrap_or_else(|| panic!("Missing tensor: {}", q_key));
+        let k = tensor_map.remove(&k_key).unwrap_or_else(|| panic!("Missing tensor: {}", k_key));
+        let v = tensor_map.remove(&v_key).unwrap_or_else(|| panic!("Missing tensor: {}", v_key));
+        let wo = tensor_map.remove(&o_key).unwrap_or_else(|| panic!("Missing tensor: {}", o_key));
+        let gate = tensor_map.remove(&gate_key).unwrap_or_else(|| panic!("Missing tensor: {}", gate_key));
+        let up = tensor_map.remove(&up_key).unwrap_or_else(|| panic!("Missing tensor: {}", up_key));
+        let w2 = tensor_map.remove(&down_key).unwrap_or_else(|| panic!("Missing tensor: {}", down_key));
+        let attn_norm = tensor_map.remove(&attn_norm_key).unwrap_or_else(|| panic!("Missing tensor: {}", attn_norm_key));
+        let ffn_norm = tensor_map.remove(&ffn_norm_key).unwrap_or_else(|| panic!("Missing tensor: {}", ffn_norm_key));
+
+        let wqkv = Tensor::cat(vec![q, k, v], 0);
+        block_record.attention.wqkv = convert_bitlinear_tensor(wqkv, &device);
+        block_record.attention.o_proj = convert_bitlinear_tensor(wo, &device);
+        block_record.feed_forward.w13 = convert_bitlinear_tensor(Tensor::cat(vec![gate, up], 0), &device);
+        block_record.feed_forward.w2 = convert_bitlinear_tensor(w2, &device);
+        
+        // Layer Norms
+        let attn_norm_shape = attn_norm.dims();
+        let attn_norm_n: usize = attn_norm_shape.iter().copied().product();
+        block_record.attention_norm.weight = Param::from_tensor(attn_norm.reshape([attn_norm_n as i32]));
+        let ffn_norm_shape = ffn_norm.dims();
+        let ffn_norm_n: usize = ffn_norm_shape.iter().copied().product();
+        block_record.ffn_norm.weight = Param::from_tensor(ffn_norm.reshape([ffn_norm_n as i32]));
+        
+        model_record.blocks.push(block_record);
+    }
+
+    model_record
+}
+
+/// Helper function to convert a single float tensor into a `BitLinearRecord`.
+fn convert_bitlinear_tensor(tensor: Tensor<NdArray, 2>, device: &NdArrayDevice) -> record::BitLinearRecord<NdArray> {
+    let [n, k] = tensor.dims();
+    
+    // Core conversion logic
+    let (quantized_data, scales_vec) = quantize_to_1_58_bit(&tensor);
+    let packed_i32_data = pack_weights(&quantized_data);
+
+    // --- The Integer-as-Float Serialization Pattern ---
+    // 1. Cast the i32 bytes into f32 bytes without changing their bit values.
+    let packed_f32_data: &[f32] = bytemuck::cast_slice(&packed_i32_data);
+    
+    // 2. Create a FLOAT tensor from the bit-cast data for serialization.
+    let packed_weights_as_float = Tensor::<NdArray, 2>::from_data(
+        TensorData::new(packed_f32_data.to_vec(), [n, k / 16]),
+        device,
+    );
+
+    // 3. Create the scales tensor normally.
+    let scales_tensor = Tensor::<NdArray, 1>::from_data(TensorData::new(scales_vec, [n]), device);
+
+    // 4. Return the record with float tensors.
+    record::BitLinearRecord {
+        packed_weights: Param::from_tensor(packed_weights_as_float),
+        weight_scales: Param::from_tensor(scales_tensor),
+    }
+}
+
+/// Quantizes a 2D tensor to {-1, 0, 1} and calculates the scaling factor for each row.
+fn quantize_to_1_58_bit(tensor: &Tensor<NdArray, 2>) -> (Vec<i8>, Vec<f32>) {
+    let [n, _k] = tensor.dims();
+    let mut all_quantized = Vec::with_capacity(tensor.dims().iter().product());
+    let mut scales = Vec::with_capacity(n);
+
+    for i in 0..n {
+        let row = tensor.clone().slice([i..i + 1]);
+        let scale = row.clone().abs().mean().into_scalar();
+        let scaled_row = row.div_scalar(scale);
+        let quantized_row: Vec<i8> = scaled_row
+            .round()
+            .clamp(-1.0, 1.0)
+            .into_data()
+            .to_vec::<f32>()
+            .unwrap()
+            .into_iter()
+            .map(|e| e as i8)
+            .collect();
+        all_quantized.extend(quantized_row);
+        scales.push(scale);
+    }
+    (all_quantized, scales)
+}
+
+// The permutation and packing logic remain the same as they operate on the flattened data.
+// They are correct and do not need changes for Phase 1.
+fn permutate_weights(weights_i8: &[i8], n: usize, k: usize) -> Vec<i8> {
+    let mut permuted_weights = vec![0i8; n * k];
+    let wmma_n = 16; let wmma_k = 32;
+    for block_n in 0..n.div_ceil(wmma_n) {
+        for block_k in 0..k.div_ceil(wmma_k) {
+            for i in 0..wmma_n {
+                for j in 0..wmma_k {
+                    if block_n * wmma_n + i >= n || block_k * wmma_k + j >= k { continue; }
+                    let thread_id = i * 2 + j / 16;
+                    let row = (thread_id / 16) * 8 + (thread_id % 8);
+                    let col = (j % 16) + 16 * ((thread_id % 16) / 8);
+                    let src_idx = (block_n * wmma_n + row) * k + (block_k * wmma_k + col);
+                    let dst_idx = (block_n * wmma_n + i) * k + (block_k * wmma_k + j);
+                    if src_idx < weights_i8.len() { permuted_weights[dst_idx] = weights_i8[src_idx]; }
+                }
+            }
+        }
+    }
+    permuted_weights
+}
+
+fn pack_weights(permuted_weights: &[i8]) -> Vec<i32> {
+    let weights_u8: Vec<u8> = permuted_weights.iter().map(|&x| (x + 2) as u8).collect();
+    let mut compressed_weights = Vec::new();
+    for chunk in weights_u8.chunks(4) {
+        let mut byte = 0u8;
+        let mut temp_chunk = chunk.to_vec();
+        temp_chunk.resize(4, 0); // Pad to ensure chunk is always size 4
+        for (i, &val) in temp_chunk.iter().enumerate() {
+            byte |= (val & 3) << (i * 2);
+        }
+        compressed_weights.push(byte);
+    }
+    let mut final_packed_weights = Vec::new();
+    for chunk in compressed_weights.chunks_exact(4) {
+        final_packed_weights.push(i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+    }
+    final_packed_weights
+}
+
+/// Reverses the packing to verify correctness. Unpacks one i32 into 16 i8 values.
+fn reverse_packing(packed_data: &[i32]) -> Vec<i8> {
+    let mut i8_data = Vec::new();
+    for &packed_i32 in packed_data {
+        for i in 0..16 {
+            let two_bits = ((packed_i32 >> (i * 2)) & 3) as u8;
+            let val_i8 = (two_bits as i8) - 2;
+            i8_data.push(val_i8);
+        }
+    }
+    i8_data
+}
+
+// =================================================================================================
+// Phase 1, Step 3: Updated Unit Test
+// =================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use burn::tensor::Distribution;
+
+    #[test]
+    fn test_record_conversion_is_correct_and_reversible() {
+        let device = NdArrayDevice::default();
+        let n = 32; let k = 64; // Small, realistic dimensions (multiple of 16 and 32)
+        
+        // --- Setup: Create mock data and ground truth ---
+        let wqkv_tensor = Tensor::<NdArray, 2>::random([n, k], Distribution::Uniform(-1.0, 1.0), &device);
+        // This is our ground truth: the raw quantized data we expect to recover.
+        let (ground_truth_quantized, ground_truth_scales) = quantize_to_1_58_bit(&wqkv_tensor);
+        
+        // --- Act: Run the conversion to get the packed data ---
+        let packed_i32_data = pack_weights(&ground_truth_quantized);
+        // Reverse the packing
+        let mut recovered_quantized = reverse_packing(&packed_i32_data);
+        // The recovered data might be padded; truncate to the original size for comparison.
+        recovered_quantized.truncate(ground_truth_quantized.len());
+        
+        // --- Assert ---
+        assert_eq!(recovered_quantized, ground_truth_quantized, "Reversed packed weights do not match ground truth quantized data.");
+        println!("\n--- Test Passed ---");
+        println!("SUCCESS: quantize -> pack -> reverse is correct and reversible.");
+    }
+}
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-converter\src\source.rs ---
+// File: E:\Desktop\Bitnet rs\crates\bitnet-converter\src\source.rs
+// --- FULL REPLACEMENT ---
+
+use burn::{
+    backend::NdArray,
+    prelude::*, // Use prelude for Tensor, TensorData, Shape, etc.
+};
+use memmap2::Mmap;
+use safetensors::{Dtype, SafeTensors};
+use std::collections::HashMap;
+use std::fs::File;
+use std::path::Path;
+use bytemuck;
+use half::bf16;
+
+pub type TensorMap = HashMap<String, Tensor<NdArray, 2>>;
+
+pub enum ModelSource {
+    SafetensorsFile(String),
+}
+
+impl ModelSource {
+    pub fn load_tensors(&self) -> Result<TensorMap, Box<dyn std::error::Error>> {
+        match self {
+            ModelSource::SafetensorsFile(path) => load_safetensors_mmap(path.as_ref()),
+        }
+    }
+}
+
+fn load_safetensors_mmap(path: &Path) -> Result<TensorMap, Box<dyn std::error::Error>> {
+    let file = File::open(path)?;
+    let mmap = unsafe { Mmap::map(&file)? };
+    let safetensors = SafeTensors::deserialize(&mmap)?;
+    let mut map = TensorMap::new();
+
+    for name in safetensors.names() {
+        let tensor_view = safetensors.tensor(name)?;
+
+        if tensor_view.dtype() != Dtype::BF16 {
+            continue;
+        }
+
+        let original_shape = tensor_view.shape();
+        let data_shape = if original_shape.len() == 1 {
+            // Promote 1D tensors (e.g., norm weights) to 2D [1, N] to fit our TensorMap type.
+            Shape::from(vec![1, original_shape[0]])
+        } else if original_shape.len() == 2 {
+            Shape::from(original_shape.to_vec())
+        } else {
+            log::warn!("Skipping tensor '{}' with unsupported shape {:?}", name, original_shape);
+            continue;
+        };
+
+        let bf16_bytes = tensor_view.data();
+        let bf16_slice = bytemuck::cast_slice::<u8, bf16>(bf16_bytes);
+        let f32_vec: Vec<f32> = bf16_slice.iter().map(|b| b.to_f32()).collect();
+
+        let data = TensorData::new(f32_vec, data_shape);
+        let tensor_f32 = Tensor::<NdArray, 2>::from_data(data, &Default::default());
+        
+        map.insert(name.to_string(), tensor_f32);
+    }
+    Ok(map)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+    use safetensors::{tensor::TensorView, Dtype, serialize_to_file};
+    use half::bf16;
+
+    #[test]
+    fn test_loads_both_1d_and_2d_tensors() {
+        let data_f32_2d = vec![1.0f32, 2.0, 3.0, 4.0];
+        let data_bf16_2d: Vec<bf16> = data_f32_2d.iter().map(|&f| bf16::from_f32(f)).collect();
+        let bytes_2d: &[u8] = bytemuck::cast_slice(&data_bf16_2d);
+
+        let data_f32_1d = vec![5.0f32, 6.0]; // A typical norm weight
+        let data_bf16_1d: Vec<bf16> = data_f32_1d.iter().map(|&f| bf16::from_f32(f)).collect();
+        let bytes_1d: &[u8] = bytemuck::cast_slice(&data_bf16_1d);
+        
+        let mut tensors = std::collections::BTreeMap::new();
+        tensors.insert("weight_2d".to_string(), TensorView::new(Dtype::BF16, vec![2, 2], bytes_2d).unwrap());
+        tensors.insert("weight_1d".to_string(), TensorView::new(Dtype::BF16, vec![2], bytes_1d).unwrap());
+        
+        let tmp = NamedTempFile::new().unwrap();
+        serialize_to_file(&tensors, &None, tmp.path()).unwrap();
+
+        let source = ModelSource::SafetensorsFile(tmp.path().to_str().unwrap().to_string());
+        let tensor_map = source.load_tensors().unwrap();
+        
+        // Assert 2D tensor was loaded correctly
+        assert!(tensor_map.contains_key("weight_2d"), "2D tensor should be loaded");
+        let tensor_2d = &tensor_map["weight_2d"];
+        assert_eq!(tensor_2d.dims(), [2, 2]);
+        assert_eq!(tensor_2d.clone().into_data().to_vec::<f32>().unwrap(), data_f32_2d);
+        
+        // Assert 1D tensor was loaded and promoted correctly
+        assert!(tensor_map.contains_key("weight_1d"), "1D tensor should be loaded");
+        let tensor_1d = &tensor_map["weight_1d"];
+        assert_eq!(tensor_1d.dims(), [1, 2], "1D tensor should be promoted to 2D");
+        assert_eq!(tensor_1d.clone().into_data().to_vec::<f32>().unwrap(), data_f32_1d);
+
+        println!("\n✅ Test Passed: `source.rs` loader correctly handles 1D and 2D tensors.");
+    }
+}
+
+--- File: E:\Desktop\Bitnet rs\crates\bitnet-converter\tests\serialization_test.rs ---
+use burn::{
+    prelude::*,
+    backend::ndarray::{NdArray, NdArrayDevice},
+    module::{Module, Param, ParamId},
+    record::{FullPrecisionSettings, NamedMpkFileRecorder, Recorder, Record},
+    tensor::{Int, Tensor},
+};
+use tempfile::NamedTempFile;
+use tempfile::tempdir;
+
+// --- The Test Module ---
+
+// This struct is the correct pattern.
+// It derives `Module` to hold `Param`s.
+// It derives `Record` to be serializable.
+// It derives `Default` to allow easy creation of an empty instance.
+#[derive(Module, Debug, Record)]
+struct TestState<B: Backend> {
+    float_tensor: Param<Tensor<B, 2>>,
+    int_tensor: Param<Tensor<B, 2, Int>>,
+}
+
+impl<B: Backend> Default for TestState<B> {
+    fn default() -> Self {
+        let device = B::Device::default();
+        Self {
+            float_tensor: Param::from_tensor(Tensor::<B, 2>::zeros([2, 2], &device)),
+            int_tensor: Param::initialized(ParamId::new(), Tensor::<B, 2, Int>::from_data([[0, 0], [0, 0]], &device)),
+        }
+    }
+}
+
+#[test]
+fn test_serialization_of_mixed_tensor_types() {
+    let device: NdArrayDevice = Default::default();
+
+    let mut state = TestState::<NdArray>::default();
+
+    state.float_tensor = Param::from_tensor(Tensor::<NdArray, 2>::from_data([[1.0, 2.0], [3.0, 4.0]], &device));
+    state.int_tensor = Param::initialized(ParamId::new(), Tensor::<NdArray, 2, Int>::from_data([[5, 6], [7, 8]], &device));
+
+    let file_handle = NamedTempFile::new().unwrap();
+    let path = file_handle.path();
+    let recorder = NamedMpkFileRecorder::<FullPrecisionSettings>::new();
+
+    recorder.record(state.clone().into_record(), path.to_path_buf()).expect("Failed to save state");
+
+    let loaded_record = recorder.load(path.to_path_buf(), &device).expect("Failed to load state");
+    let loaded_state = TestState::<NdArray>::default().load_record(loaded_record);
+
+    assert_eq!(loaded_state.float_tensor.val().to_data().to_vec::<f32>().unwrap(), vec![1.0, 2.0, 3.0, 4.0]);
+    assert_eq!(loaded_state.int_tensor.val().to_data().to_vec::<i64>().unwrap(), vec![5, 6, 7, 8]);
+
+    println!("\n--- SUCCESS ---");
+    println!("Test 1 Passed: The basic serialization and deserialization of mixed tensor types works.");
+}
+
+#[derive(Module, Debug, Record)]
+struct ConvertedAttentionBlock<B: Backend> {
+    packed_weights: Param<Tensor<B, 2>>, // Float for serialization
+    weight_scales: Param<Tensor<B, 1>>,  // Float
+}
+
+impl<B: Backend> Default for ConvertedAttentionBlock<B> {
+    fn default() -> Self {
+        let device = B::Device::default();
+        Self {
+            packed_weights: Param::from_tensor(Tensor::<B, 2>::zeros([2, 2], &device)),
+            weight_scales: Param::from_tensor(Tensor::<B, 1>::zeros([2], &device)),
+        }
+    }
+}
+
+#[test]
+fn test_2_serialization_of_bitnet_specific_data() {
+    let device: NdArrayDevice = Default::default();
+
+    // 1. Create dummy data that mimics the output of our converter.
+    let dummy_packed_weights_int = Tensor::<NdArray, 2, Int>::from_data([[1, 2], [3, 4]], &device);
+    let dummy_scales = Tensor::<NdArray, 1>::from_data([0.5, 0.6], &device);
+
+    // 2. Transmute the integer tensor's bits into a float tensor for storage.
+    let packed_weights_as_float = Tensor::<NdArray, 2>::from_data(
+        dummy_packed_weights_int.clone().into_data().convert::<f32>(),
+        &device
+    );
+
+    // 3. Initialize our state struct with this data.
+    let mut block_to_save = ConvertedAttentionBlock::<NdArray>::default();
+    block_to_save.packed_weights = Param::from_tensor(packed_weights_as_float);
+    block_to_save.weight_scales = Param::from_tensor(dummy_scales.clone());
+
+    // 4. Save the struct to a temporary file.
+    let file_handle = NamedTempFile::new().unwrap();
+    let path = file_handle.path();
+    let recorder = NamedMpkFileRecorder::<FullPrecisionSettings>::new();
+    recorder.record(block_to_save.clone().into_record(), path.to_path_buf()).expect("Failed to save record.");
+
+    // 5. Load the struct back.
+    let loaded_record = recorder.load(path.to_path_buf(), &device).expect("Failed to load record.");
+    let loaded_block = ConvertedAttentionBlock::<NdArray>::default().load_record(loaded_record);
+
+    // 6. Verify the float scales directly.
+    assert_eq!(
+        loaded_block.weight_scales.val().to_data().to_vec::<f32>().unwrap(),
+        dummy_scales.to_data().to_vec::<f32>().unwrap()
+    );
+
+    // 7. Verify the integer weights by reversing the bit-cast.
+    let loaded_packed_as_float = loaded_block.packed_weights.val();
+    let loaded_packed_int = Tensor::<NdArray, 2, Int>::from_data(
+        loaded_packed_as_float.into_data().convert::<i64>(),
+        &device
+    );
+    assert_eq!(
+        loaded_packed_int.to_data().to_vec::<i64>().unwrap(),
+        dummy_packed_weights_int.to_data().to_vec::<i64>().unwrap()
+    );
+
+    println!("\n--- Test 2 Passed ---");
+    println!("SUCCESS: A struct containing BitNet-specific packed (i32) and scale (f32) tensors can be serialized.");
+}
+
+#[derive(Module, Debug, Record)]
+struct TestBlockRecord<B: Backend> {
+    attn_packed: Param<Tensor<B, 2, Int>>,
+    attn_scales: Param<Tensor<B, 1>>,
+}
+
+impl<B: Backend> Default for TestBlockRecord<B> {
+    fn default() -> Self {
+        let device = B::Device::default();
+        Self {
+            attn_packed: Param::initialized(ParamId::new(), Tensor::<B, 2, Int>::zeros([2, 2], &device)),
+            attn_scales: Param::from_tensor(Tensor::<B, 1>::zeros([2], &device)),
+        }
+    }
+}
+
+#[derive(Module, Debug, Record)]
+struct TestEmbeddingRecord<B: Backend> {
+    embedding: Param<Tensor<B, 2>>,
+}
+
+impl<B: Backend> Default for TestEmbeddingRecord<B> {
+    fn default() -> Self {
+        let device = B::Device::default();
+        Self {
+            embedding: Param::from_tensor(Tensor::<B, 2>::zeros([2, 2], &device)),
+        }
+    }
+}
+
+#[test]
+fn test_3_can_save_and_load_as_separate_files_for_streaming() {
+    let device: NdArrayDevice = Default::default();
+
+    // 1. Create a temporary DIRECTORY to store our multiple files.
+    let dir = tempdir().unwrap();
+
+    // 2. Create dummy data for two separate logical blocks.
+    let block_0 = TestBlockRecord::<NdArray> {
+        attn_packed: Param::initialized(ParamId::new(), Tensor::<NdArray, 2, Int>::from_data([[1, 2], [3, 4]], &device)),
+        attn_scales: Param::from_tensor(Tensor::<NdArray, 1>::from_data([0.1, 0.2], &device)),
+    };
+    let block_1 = TestBlockRecord::<NdArray> {
+        attn_packed: Param::initialized(ParamId::new(), Tensor::<NdArray, 2, Int>::from_data([[5, 6], [7, 8]], &device)),
+        attn_scales: Param::from_tensor(Tensor::<NdArray, 1>::from_data([0.3, 0.4], &device)),
+    };
+    let embedding = TestEmbeddingRecord::<NdArray> {
+        embedding: Param::from_tensor(Tensor::<NdArray, 2>::from_data([[9.0, 10.0], [11.0, 12.0]], &device)),
+    };
+    
+    // 3. Save each block to its own file within the directory.
+    let recorder = NamedMpkFileRecorder::<FullPrecisionSettings>::new();
+    
+    recorder.record(block_0.into_record(), dir.path().join("block_0.mpk"))
+        .expect("Failed to save block 0");
+    recorder.record(block_1.into_record(), dir.path().join("block_1.mpk"))
+        .expect("Failed to save block 1");
+    recorder.record(embedding.into_record(), dir.path().join("embedding.mpk"))
+        .expect("Failed to save embedding");
+
+    println!("Saved model parts to separate files in: {}", dir.path().display());
+
+    // 4. Now, simulate a streaming load by loading each file individually.
+    let loaded_block_0_record = recorder.load(dir.path().join("block_0.mpk"), &device).unwrap();
+    let loaded_block_0 = TestBlockRecord::<NdArray>::default().load_record(loaded_block_0_record);
+
+    let loaded_embedding_record = recorder.load(dir.path().join("embedding.mpk"), &device).unwrap();
+    let loaded_embedding = TestEmbeddingRecord::<NdArray>::default().load_record(loaded_embedding_record);
+
+    // 5. Assert that the data loaded from each file is correct.
+    assert_eq!(loaded_block_0.attn_packed.val().to_data().to_vec::<i64>().unwrap(), vec![1, 2, 3, 4]);
+    assert_eq!(loaded_block_0.attn_scales.val().to_data().to_vec::<f32>().unwrap(), vec![0.1, 0.2]);
+    assert_eq!(loaded_embedding.embedding.val().to_data().to_vec::<f32>().unwrap(), vec![9.0, 10.0, 11.0, 12.0]);
+    
+    println!("\n--- Test 3 Passed ---");
+    println!("SUCCESS: Saving the model as separate, per-layer files works.");
+    println!("This validates our streaming strategy.");
+}
+
+#[derive(Module, Debug, Record)]
+struct TestBitLinear<B: Backend> {
+    packed_weights: Param<Tensor<B, 2>>,
+    weight_scales: Param<Tensor<B, 1>>,
+}
+
+impl<B: Backend> Default for TestBitLinear<B> {
+    fn default() -> Self {
+        let device = B::Device::default();
+        Self {
+            packed_weights: Param::from_tensor(Tensor::<B, 2>::zeros([1, 1], &device)),
+            weight_scales: Param::from_tensor(Tensor::<B, 1>::zeros([1], &device)),
+        }
+    }
+}
+
+#[derive(Module, Debug, Record)]
+struct TestAttention<B: Backend> {
+    wqkv: TestBitLinear<B>,
+    o_proj: TestBitLinear<B>,
+}
+
+impl<B: Backend> Default for TestAttention<B> {
+    fn default() -> Self {
+        Self {
+            wqkv: TestBitLinear::default(),
+            o_proj: TestBitLinear::default(),
+        }
+    }
+}
+
+#[derive(Module, Debug, Record)]
+struct TestFeedForward<B: Backend> {
+    w13: TestBitLinear<B>,
+    w2: TestBitLinear<B>,
+}
+
+impl<B: Backend> Default for TestFeedForward<B> {
+    fn default() -> Self {
+        Self {
+            w13: TestBitLinear::default(),
+            w2: TestBitLinear::default(),
+        }
+    }
+}
+
+#[derive(Module, Debug, Record)]
+struct TestRmsNorm<B: Backend> {
+    weight: Param<Tensor<B, 1>>,
+}
+
+impl<B: Backend> Default for TestRmsNorm<B> {
+    fn default() -> Self {
+        let device = B::Device::default();
+        Self {
+            weight: Param::from_tensor(Tensor::<B, 1>::zeros([1], &device)),
+        }
+    }
+}
+
+#[derive(Module, Debug, Record)]
+struct TestTransformerBlock<B: Backend> {
+    attn: TestAttention<B>,
+    ffn: TestFeedForward<B>,
+    attn_norm: TestRmsNorm<B>,
+    ffn_norm: TestRmsNorm<B>,
+}
+
+impl<B: Backend> Default for TestTransformerBlock<B> {
+    fn default() -> Self {
+        Self {
+            attn: TestAttention::default(),
+            ffn: TestFeedForward::default(),
+            attn_norm: TestRmsNorm::default(),
+            ffn_norm: TestRmsNorm::default(),
+        }
+    }
+}
+
+#[test]
+fn test_4_can_save_and_load_a_realistic_model_block() {
+    let device: NdArrayDevice = Default::default();
+
+    // 1. Create a fully populated, nested struct that mirrors a real Transformer block.
+    let block_to_save = TestTransformerBlock {
+        attn: TestAttention {
+            wqkv: TestBitLinear {
+                packed_weights: Param::from_tensor(Tensor::<NdArray, 2>::ones([32, 32 / 16], &device)),
+                weight_scales: Param::from_tensor(Tensor::<NdArray, 1>::ones([32], &device)),
+            },
+            o_proj: TestBitLinear {
+                packed_weights: Param::from_tensor(Tensor::<NdArray, 2>::zeros([32, 32 / 16], &device)),
+                weight_scales: Param::from_tensor(Tensor::<NdArray, 1>::zeros([32], &device)),
+            },
+        },
+        ffn: TestFeedForward {
+            w13: TestBitLinear {
+                packed_weights: Param::from_tensor(Tensor::<NdArray, 2>::ones([64, 32 / 16], &device)),
+                weight_scales: Param::from_tensor(Tensor::<NdArray, 1>::ones([64], &device)),
+            },
+            w2: TestBitLinear {
+                packed_weights: Param::from_tensor(Tensor::<NdArray, 2>::zeros([32, 64 / 16], &device)),
+                weight_scales: Param::from_tensor(Tensor::<NdArray, 1>::zeros([32], &device)),
+            },
+        },
+        attn_norm: TestRmsNorm {
+            weight: Param::from_tensor(Tensor::<NdArray, 1>::from_data(&vec![1.0; 32][..], &device)),
+        },
+        ffn_norm: TestRmsNorm {
+            weight: Param::from_tensor(Tensor::<NdArray, 1>::from_data(&vec![2.0; 32][..], &device)),
+        },
+    };
+
+    // 2. Save this entire complex struct to a single file.
+    let file_handle = NamedTempFile::new().unwrap();
+    let path = file_handle.path();
+    let recorder = NamedMpkFileRecorder::<FullPrecisionSettings>::new();
+
+    recorder.record(block_to_save.clone().into_record(), path.to_path_buf()).expect("Failed to save the block record");
+
+    // 3. Load the entire block back.
+    let loaded_record = recorder.load(path.to_path_buf(), &device).expect("Failed to load the block record");
+    let loaded_block = TestTransformerBlock::<NdArray>::default().load_record(loaded_record);
+
+    // 4. Assert a few key values to ensure the nested structure was restored correctly.
+    assert_eq!(loaded_block.attn_norm.weight.val().to_data().to_vec::<f32>().unwrap(), vec![1.0; 32]);
+    assert_eq!(loaded_block.ffn.w13.weight_scales.val().to_data().to_vec::<f32>().unwrap(), vec![1.0; 64]);
+    // Check a value from a deeply nested tensor
+    assert_eq!(loaded_block.attn.wqkv.packed_weights.val().to_data().to_vec::<f32>().unwrap()[0], 1.0);
+
+    println!("\n--- Test 4 Passed ---");
+    println!("SUCCESS: A realistic, nested struct representing a full model layer can be serialized.");
+}

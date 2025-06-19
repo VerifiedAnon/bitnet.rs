@@ -1,0 +1,29 @@
+[package]
+name = "bitnet-tools"
+version = "0.1.0"
+edition = "2021"
+description = "Essential utilities for BitNet projects - file combining, model download, and more"
+authors = ["BitNet-rs Contributors"]
+license = "Apache-2.0"
+repository = "https://github.com/microsoft/BitNet"
+documentation = "https://docs.rs/bitnet-tools"
+readme = "README.md"
+keywords = ["machine-learning", "deep-learning", "llm", "bitnet", "tools"]
+categories = ["science", "development-tools", "command-line-utilities"]
+
+# Docs.rs-specific settings
+[package.metadata.docs.rs]
+all-features = true
+targets = ["x86_64-unknown-linux-gnu"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+thiserror = "1.0"
+serde_json = "1.0"
+safetensors = "0.3"
+hf-hub = "0.3"
+tempfile = "3.10.1"
+ureq = "2.9"
+indicatif = "0.17"
+reqwest = { version = "0.11", features = ["blocking"] }
+sha2 = "0.10"

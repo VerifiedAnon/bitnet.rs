@@ -1,0 +1,12 @@
+[package]
+name = "burn-custom-kernel-test-0-17"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wgpu = "0.19"
+pollster = "0.3"
+bytemuck = { version = "1.14", features = ["derive"] }
+derive-new = "0.6.0"
+
+[workspace]

@@ -1,0 +1,48 @@
+[package]
+name = "bitnet-converter"
+version = "0.1.0"
+edition = "2021"
+description = "Convert Hugging Face safetensors to BitNet's optimized, quantized format"
+authors = ["BitNet-rs Contributors"]
+license = "Apache-2.0"
+repository = "https://github.com/microsoft/BitNet"
+documentation = "https://docs.rs/bitnet-converter"
+readme = "README.md"
+keywords = ["machine-learning", "deep-learning", "llm", "bitnet", "converter"]
+categories = ["science", "computer-vision", "command-line-utilities"]
+
+# Docs.rs-specific settings
+[package.metadata.docs.rs]
+all-features = true
+targets = ["x86_64-unknown-linux-gnu"]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lib]
+name = "bitnet_converter"
+path = "src/lib.rs"
+
+[dependencies]
+bitnet-tools = { path = "../bitnet-tools" }
+bincode = { workspace = true }
+clap = { workspace = true }
+indicatif = { workspace = true }
+safetensors = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+tracing = { workspace = true }
+memmap2 = "0.9.4"
+
+# Add dependencies needed for BF16 conversion
+bytemuck = { workspace = true }
+half = { workspace = true }
+tempfile = "3.10.1"
+serde = { version = "1.0", features = ["derive"] }
+simplelog = "0.12"
+chrono = "0.4"
+
+rayon = "1.7"
+
+thiserror = "2.0.12"
+
+[dev-dependencies]
+rand = "0.9.1"

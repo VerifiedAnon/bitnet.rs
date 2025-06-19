@@ -1,0 +1,33 @@
+# Rust build artifacts
+/target/
+**/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Generated files and models
+/logs/
+/models/
+/models/Original/
+/models/Converted/
+**/burn-custom-kernel-test-*/target/
+
+# Windows specific
+*.exe
+*.pdb
+
+# Project specific
+found_files.txt
+safetensor_keys.txt
+
+# Reference code and assets
+References/
+References/official/
+
+# Keep .workspace_root
+!.workspace_root
