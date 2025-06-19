@@ -56,17 +56,17 @@ BitNet-rs is a Rust-based toolkit for BitNet model conversion, inference, and ex
 
 ```sh
 # Clone the repo
-$ git clone <repo-url>
-$ cd bitnet-rs
+git clone https://github.com/ocentra/bitnet-ocentra.git
+cd bitnet-ocentra
 
 # Build everything
-$ cargo build --workspace
+cargo build --workspace
 
 # Download a model and convert it
-$ cargo run -p bitnet-converter -- --input-dir models/Original/microsoft/bitnet-b1.58-2B-4T-bf16 --output-dir models/Converted/microsoft/bitnet-b1.58-2B-4T-bf16
+cargo run -p bitnet-converter -- --input-dir models/Original/microsoft/bitnet-b1.58-2B-4T-bf16 --output-dir models/Converted/microsoft/bitnet-b1.58-2B-4T-bf16
 
 # Run the app (CLI/GUI)
-$ cargo run -p bitnet-app -- --help
+cargo run -p bitnet-app -- --help
 ```
 
 ---
@@ -77,8 +77,8 @@ $ cargo run -p bitnet-app -- --help
    https://rustup.rs/
 2. **Clone the repository:**
    ```sh
-   git clone <repo-url>
-   cd bitnet-rs
+   git clone https://github.com/ocentra/bitnet-ocentra.git
+   cd bitnet-ocentra
    ```
 3. **Build all crates:**
    ```sh
@@ -137,4 +137,4 @@ $ cargo run -p bitnet-app -- --help
 
 ---
 
-> For more details, see the project plan and individual crate READMEs. 
+> For more details, see the project plan and individual crate READMEs.
