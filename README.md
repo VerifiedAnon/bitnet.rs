@@ -109,8 +109,12 @@ cargo run -p bitnet-app -- --help
   ```sh
   cargo run -p bitnet-app -- --help
   ```
-- **Combine files (tools):**
+- **File Combiner Tools:**
   ```sh
+  # Run the GUI version
+  cargo run --release -p file_combiner_gui
+  
+  # Run the CLI version
   cargo run -p bitnet-tools --bin combine_files -- --help
   ```
 

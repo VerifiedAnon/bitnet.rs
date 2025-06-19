@@ -6,6 +6,51 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use bitnet_tools::combine::{is_combined_file, file_matches_filter, combine_files_to_path};
+use ignore::WalkBuilder;
+
+// Common binary and non-text file extensions to ignore
+const IGNORED_EXTENSIONS: &[&str] = &[
+    // Binary formats
+    ".bin", ".exe", ".dll", ".so", ".dylib", ".pdb",
+    ".safetensors", ".onnx", ".pt", ".pth", ".h5", ".ckpt",
+    // Image formats
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp",
+    ".ico", ".svg",
+    // Audio/Video
+    ".mp3", ".wav", ".mp4", ".avi", ".mov",
+    // Archives
+    ".zip", ".tar", ".gz", ".7z", ".rar",
+    // Other binary formats
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx",
+    // Cache and build artifacts
+    ".pyc", ".pyo", ".rlib", ".rmeta", ".d",
+    // Database files
+    ".db", ".sqlite", ".sqlite3",
+    // Rust specific
+    ".rs.bk", ".lock",
+];
+
+// Common directories to ignore (in addition to .gitignore patterns)
+const IGNORED_DIRECTORIES: &[&str] = &[
+    // Version control
+    ".git", ".github", ".gitignore", ".gitattributes", ".gitmodules",
+    // IDE and editor
+    ".vscode", ".idea", ".vs", ".settings",
+    // Build and cache
+    "target", "node_modules", "__pycache__", ".cache",
+    // Environment and config
+    ".env", ".config", ".local",
+    // Logs and temporary files
+    "logs", "temp", "tmp",
+    // Dependencies
+    "vendor", "packages", "deps",
+    // Documentation build
+    "docs/_build", "site", "public",
+    // Test coverage
+    "coverage", ".coverage", "htmlcov",
+    // Project specific (from your .gitignore)
+    "References", "models", "Original", "Converted",
+];
 
 #[derive(PartialEq)]
 enum Tab {
@@ -509,39 +554,143 @@ fn checkbox_tristate(ui: &mut egui::Ui, state: &mut CheckState) -> bool {
     }
 }
 
-fn build_tree_with_filter(path: &Path, filter_exts: &[String]) -> std::io::Result<DirEntryNode> {
-    let is_dir = fs::metadata(path)?.is_dir();
-    let mut node = DirEntryNode::new(path.to_path_buf(), is_dir);
+/// Returns true if the directory should be ignored
+fn should_ignore_directory(path: &Path) -> bool {
+    if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+        IGNORED_DIRECTORIES.iter().any(|ignored| {
+            dir_name.eq_ignore_ascii_case(ignored) ||
+            // Handle nested cases like "docs/_build"
+            ignored.split('/').all(|part| dir_name.eq_ignore_ascii_case(part))
+        })
+    } else {
+        false
+    }
+}
 
-    if is_dir {
-        for entry in fs::read_dir(path)? {
-            let entry = entry?;
-            let child_path = entry.path();
-            if entry.file_type()?.is_dir() {
-                if let Ok(child_node) = build_tree_with_filter(&child_path, filter_exts) {
-                    if !child_node.children.is_empty() {
-                        node.children.push(child_node);
-                    }
-                }
-            } else if (filter_exts.is_empty() || file_matches_filter(&child_path, filter_exts))
-                && !is_combined_file(&child_path) // Exclude *_combined.txt
-            {
-                node.children.push(DirEntryNode::new(child_path, false));
+/// Returns true if the file should be ignored based on extension
+fn should_ignore_file(path: &Path) -> bool {
+    // Check file extensions
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        let ext = format!(".{}", ext.to_lowercase());
+        if IGNORED_EXTENSIONS.contains(&ext.as_str()) {
+            return true;
+        }
+    }
+
+    // Check if the file itself is in the ignored list (like .gitignore)
+    if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+        if IGNORED_DIRECTORIES.contains(&file_name) {
+            return true;
+        }
+    }
+
+    is_combined_file(path) // Also ignore *_combined.txt files
+}
+
+fn build_tree_with_filter(path: &Path, filter_exts: &[String]) -> std::io::Result<DirEntryNode> {
+    let mut root = DirEntryNode::new(path.to_path_buf(), true);
+    
+    // Use WalkBuilder to respect .gitignore
+    let walker = WalkBuilder::new(path)
+        .hidden(true)        // Skip hidden files
+        .git_ignore(true)    // Respect .gitignore
+        .build();
+
+    let mut dirs: std::collections::HashMap<PathBuf, Vec<DirEntryNode>> = std::collections::HashMap::new();
+    
+    for entry in walker.filter_map(Result::ok) {
+        let path = entry.path().to_owned();
+        if path == root.path {
+            continue;
+        }
+
+        // Skip ignored directories
+        if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+            if should_ignore_directory(&path) {
+                continue;
+            }
+            let node = DirEntryNode::new(path.clone(), true);
+            if let Some(parent) = path.parent() {
+                dirs.entry(parent.to_owned())
+                    .or_default()
+                    .push(node);
+            }
+        } else if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+            // Skip files we want to ignore
+            if should_ignore_file(&path) {
+                continue;
+            }
+
+            // Apply user's extension filter
+            if !filter_exts.is_empty() && !file_matches_filter(&path, filter_exts) {
+                continue;
+            }
+
+            let node = DirEntryNode::new(path.clone(), false);
+            if let Some(parent) = path.parent() {
+                dirs.entry(parent.to_owned())
+                    .or_default()
+                    .push(node);
             }
         }
     }
-    Ok(node)
+
+    // Build the tree from bottom up
+    fn build_tree_recursive(
+        path: &Path,
+        dirs: &mut std::collections::HashMap<PathBuf, Vec<DirEntryNode>>,
+    ) -> Vec<DirEntryNode> {
+        if let Some(children) = dirs.remove(path) {
+            let mut result = Vec::new();
+            for mut child in children {
+                if child.is_dir {
+                    child.children = build_tree_recursive(&child.path, dirs);
+                    if !child.children.is_empty() {
+                        result.push(child);
+                    }
+                } else {
+                    result.push(child);
+                }
+            }
+            result.sort_by(|a, b| {
+                // Directories first, then files
+                if a.is_dir == b.is_dir {
+                    a.path.file_name().cmp(&b.path.file_name())
+                } else {
+                    b.is_dir.cmp(&a.is_dir)
+                }
+            });
+            result
+        } else {
+            Vec::new()
+        }
+    }
+
+    root.children = build_tree_recursive(path, &mut dirs);
+    Ok(root)
 }
 
-fn main() -> eframe::Result<()> {
+fn main() {
+    eprintln!("Starting Universal File Combiner...");
+    
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([900.0, 700.0]),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([900.0, 700.0])
+            .with_title("Universal File Combiner"),
         ..Default::default()
     };
 
-    eframe::run_native(
+    eprintln!("Initializing GUI...");
+    
+    match eframe::run_native(
         "Universal File Combiner",
         options,
-        Box::new(|_cc| Box::new(FileCombinerApp::default())),
-    )
+        Box::new(|_cc| {
+            eprintln!("Creating application instance...");
+            Box::new(FileCombinerApp::default())
+        }),
+    ) {
+        Ok(_) => eprintln!("GUI closed successfully"),
+        Err(e) => eprintln!("Error running GUI: {}", e),
+    }
 }

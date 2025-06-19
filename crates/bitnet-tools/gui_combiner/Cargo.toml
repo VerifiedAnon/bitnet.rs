@@ -12,3 +12,4 @@ eframe = "0.27"
 egui = "0.27"
 rfd = "0.14"
 bitnet-tools = { path = "../" }
+ignore = "0.4"
