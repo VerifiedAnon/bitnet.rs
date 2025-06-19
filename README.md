@@ -24,9 +24,8 @@
 - 🎯 **Optimized** — SIMD, LUT, and GPU kernels
 - 🎨 **GUI & CLI** — Interactive and scriptable interfaces
 - 🔍 **Visualization** — Attention maps and kernel profiling
-- 🌟 **[Vibe Coding Ready](#vibe-coding)** — AI-assisted development with comprehensive planning
 - 🌐 **WASM-ready** — (Experimental)
-- 🎯 **[Vibe Coding Ready](#vibe-coding)** — Project Plan, Checklist, and Cursor integration
+- 🎯 **[Vibe Coding Ready](#vibe-coding)** — AI-assisted development with comprehensive planning i.e Project Plan, Checklist, and Cursor integration
 
 ---
 
