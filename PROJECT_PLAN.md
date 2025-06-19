@@ -226,6 +226,8 @@ bitnet-rs/
 
 ### Deep Dive 1: op.rs — The BitLinear CustomOp & Kernel Signatures
 
+**File:** `crates/bitnet-core/src/op.rs`
+
 This is the most important interface in the project. Its implementation must be precise.
 
 **Why:** This is the most important interface in the project. It abstracts backend-specific logic and ensures the model code is backend-agnostic.
@@ -248,160 +250,383 @@ pub struct BitLinear {
     out_features: usize,
     
     // **CPU-ONLY**: Pre-computed Look-Up Table. Generated on model load.
-    // This is a prime example of backend-specific data.
     #[cfg(not(feature = "gpu"))]
     precomputed_lut: Tensor,
 }
-```
 
-**forward() Logic Flow:**
+// Implementation of the core forward pass
+impl CustomOp for BitLinear {
+    fn forward(&self, x: &Tensor) -> Result<Tensor> {
+        // 1. Online Activation Quantization
+        let (x_quant, x_scales) = self.quantize_activations(x)?;
 
-```rust
-// In impl CustomOp for BitLinear
-fn forward(&self, x: &Tensor) -> Result<Tensor> {
-    // 1. Online Activation Quantization
-    // Replicates the `quant_input` logic from the Python model.py.
-    let (x_quant, x_scales) = self.quantize_activations(x)?;
-
-    // 2. Backend Dispatch (Compile-Time)
-    #[cfg(feature = "gpu")]
-    {
-        // GPU path: call the wgpu kernel executor.
-        crate::kernels::wgpu::execute(
-            &x_quant,           // i8 activations
-            &x_scales,          // f32 scales
-            &self.packed_weights, // i8 packed weights
-            &self.weight_scales,  // f32 weight scales
-            self.out_features,
-        )
-    }
-    #[cfg(not(feature = "gpu"))]
-    {
-        // CPU path: call the SIMD dispatcher.
-        crate::kernels::cpu::execute(
-            &x_quant,
-            &x_scales,
-            &self.precomputed_lut, // This would be part of the BitLinear struct
-            &self.weight_scales,
-        )
+        // 2. Backend Dispatch (Compile-Time)
+        #[cfg(feature = "gpu")]
+        {
+            // GPU path: call the wgpu kernel executor
+            crate::kernels::wgpu::execute(
+                &x_quant,           // i8 activations
+                &x_scales,          // f32 scales
+                &self.packed_weights, // i8 packed weights
+                &self.weight_scales,  // f32 weight scales
+                self.out_features,
+            )
+        }
+        #[cfg(not(feature = "gpu"))]
+        {
+            // CPU path: call the SIMD dispatcher
+            crate::kernels::cpu::execute(
+                &x_quant,
+                &x_scales,
+                &self.precomputed_lut,
+                &self.weight_scales,
+            )
+        }
     }
 }
 ```
-
-**Validation Strategy:** The op.rs itself doesn't need unit tests, as its logic is just dispatch. The real testing happens in the kernel tests, which validate the execute functions it calls.
-
----
 
 ### Deep Dive 2: kernels/cpu_*.rs — The CPU LUT Kernel Logic
 
-**Why:** The LUT approach is the only way to achieve high performance for quantized inference on CPUs. It is also the most fragile and error-prone part of the codebase.
+**Files:** 
+- `crates/bitnet-core/src/kernels/cpu_x86.rs`
+- `crates/bitnet-core/src/kernels/cpu_arm.rs`
 
-**Informed By:** The ggml/bitnet-lut-kernels-*.h files.
+**Core SIMD Implementation (x86):**
 
-**Core Concept:** The matrix multiplication is transformed into a series of table lookups. This happens in two phases: a one-time lut_ctor (LUT constructor) and the actual inference qgemm_lut.
-
-### Purpose
-
-- Provide a developer-facing, core-level UI for visualizing and debugging model internals kernel performance, and training progress.
-- Enable advanced users to inspect weights, activations, attention maps, and kernel timings directly from the core library, independent of the main application GUI.
-- Facilitate rapid debugging and performance tuning during development and research.
-
-### Implementation Notes
-
-- This is intended for advanced users, developers, and researchers.
-- It may use `egui`, `plotters`, or other Rust-native visualization libraries.
-- All core GUI features should be optional and gated behind a feature flag (e.g., `core-gui`).
-
-### Phase A: LUT Constructor (lut_ctor)
-
-- Runs once when BitLinear is created.
-- **Input:** The packed i8 weight tensor.
-- **Output:** A new i8 tensor representing the Look-Up Table (QLUT).
-- **Logic Flow:**
-  - For each group of weights that a SIMD instruction will process, calculate all possible output sums for every combination of input values {-1, 0, 1}.
-  - Store these pre-calculated sums in a small table.
-  - Transpose & permute the LUT data for a SIMD-friendly memory layout (mirroring GGML's Transpose_8_8).
-  - Concatenate these small tables into the large, final QLUT tensor.
-
-### Phase B: Inference (qgemm_lut)
-
-- **Input:** The i8 quantized activations and the pre-computed QLUT.
-- **Logic Flow:**
-  - Load a vector of quantized activations using a SIMD instruction.
-  - Use these activation values as indices into the QLUT via SIMD shuffle/table instructions (_mm256_shuffle_epi8 on x86, vqtbl1q_s8 on ARM). This is the core "multiplication-free" step.
-  - Accumulate the results from the lookups into a SIMD vector of sums.
-  - After the inner loop, de-quantize: convert the accumulator vector to f32, multiply by activation and weight scales.
-
-**Validation Strategy:** kernel_tests.rs must contain a fn scalar_qgemm_lut(...) that performs the same logic with simple for loops and array lookups. Tests for cpu_x86.rs and cpu_arm.rs will assert bit-for-bit identical output to this scalar version for a variety of inputs.
-
----
-
-### Deep Dive 3: bitnet-core/src/kernels/bitnet_kernel.wgsl — The GPU Kernel Data Flow
-
-**Why:** The GPU kernel is the most performance-critical and hardware-specific part of the project. It must be correct, fast, and match the CPU/official outputs.
-
-**Informed By:** microsoft/BitNet/gpu/bitnet_kernels.cu.
-
-**Core Concept:** Decode-and-Multiply. Each thread in a workgroup processes a portion of the matrix multiplication in parallel.
-
-**WGSL Pseudo-Shader Structure:**
-
-```wgsl
-// Bindings for our input and output buffers
-@group(0) @binding(0) var<storage, read> activations: array<i32>; // i8 packed into i32 for efficiency
-@group(0) @binding(1) var<storage, read> activation_scales: array<f32>;
-@group(0) @binding(2) var<storage, read> packed_weights: array<i32>; // e.g., 16x 2-bit weights per i32
-@group(0) @binding(3) var<storage, read> weight_scales: array<f32>;
-@group(0) @binding(4) var<storage, write> output: array<f32>;
-
-var<workgroup> partial_sums: array<atomic<i32>, 128>; // Size matches workgroup size
-
-fn decode_weights(packed: u32) -> array<i32, 16> { /* bitwise shifts and masks */ }
-fn dp4a_emulation(a: vec4<i32>, b: vec4<i32>) -> i32 { return dot(a, b); }
-
-@compute @workgroup_size(8, 16, 1)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>,
-        @builtin(local_invocation_id) local_id: vec3<u32>) {
-    let local_idx = local_id.y * 8 + local_id.x;
-    var accumulator: i32 = 0;
-    // Main Loop: decode, multiply, accumulate
-    // Reduction: atomicStore, workgroupBarrier, final sum, dequantize, write output
+```rust
+// In crates/bitnet-core/src/kernels/cpu_x86.rs
+#[cfg(target_arch = "x86_64")]
+pub unsafe fn qgemm_lut(
+    activations: &[i8],
+    lut: &[i8],
+    scales: &[f32],
+    m: usize,
+    n: usize,
+    k: usize,
+) -> Vec<f32> {
+    use std::arch::x86_64::*;
+    
+    let mut output = vec![0.0f32; m * n];
+    
+    for i in 0..m {
+        for j in 0..n {
+            let mut sum_vec = _mm256_setzero_si256();
+            
+            // Process 32 elements at a time using AVX2
+            for k_idx in (0..k).step_by(32) {
+                // Load 32 activations
+                let act = _mm256_loadu_si256(
+                    activations.as_ptr().add(i * k + k_idx) as *const __m256i
+                );
+                
+                // Use activations as indices into LUT
+                let lut_result = _mm256_shuffle_epi8(
+                    _mm256_loadu_si256(
+                        lut.as_ptr().add(j * k + k_idx) as *const __m256i
+                    ),
+                    act
+                );
+                
+                // Accumulate results
+                sum_vec = _mm256_add_epi32(sum_vec, lut_result);
+            }
+            
+            // Horizontal sum and scaling
+            let sum = _mm256_extract_epi32(sum_vec, 0) +
+                     _mm256_extract_epi32(sum_vec, 1) +
+                     _mm256_extract_epi32(sum_vec, 2) +
+                     _mm256_extract_epi32(sum_vec, 3) +
+                     _mm256_extract_epi32(sum_vec, 4) +
+                     _mm256_extract_epi32(sum_vec, 5) +
+                     _mm256_extract_epi32(sum_vec, 6) +
+                     _mm256_extract_epi32(sum_vec, 7);
+                     
+            output[i * n + j] = sum as f32 * scales[j];
+        }
+    }
+    
+    output
 }
 ```
 
-**Validation Strategy:** kernel_tests.rs will compare the GPU output against the scalar CPU implementation. The bitwise logic in decode_weights must be the exact inverse of the packing logic in bitnet-converter.
+### Deep Dive 3: bitnet-core/src/kernels/bitnet_kernel.wgsl — The GPU Kernel Data Flow
 
----
+**File:** `crates/bitnet-core/src/kernels/bitnet_kernel.wgsl`
+
+```wgsl
+// bitnet_kernel.wgsl
+// Optimized BitNet B1.58 Ternary Kernel for WGPU 
+// Supports {-1, 0, +1} ternary weights with efficient packing and vectorization
+
+struct BitnetMetadata {
+    M: u32,           // Batch size
+    N: u32,           // Output features  
+    K: u32,           // Input features
+    K_packed: u32,    // K / 16 (since we pack 16 weights per u32)
+};
+
+@group(0) @binding(0) var<uniform> metadata: BitnetMetadata;
+@group(0) @binding(1) var<storage, read> activations: array<i32>;
+@group(0) @binding(2) var<storage, read> packed_weights: array<u32>;
+@group(0) @binding(3) var<storage, read> weight_scales: array<f32>;
+@group(0) @binding(4) var<storage, read> activation_scales: array<f32>; // Per-batch activation scales
+@group(0) @binding(5) var<storage, read_write> output: array<f32>;
+
+// Optimized tiling parameters for modern GPUs
+const TILE_DIM_M: u32 = 64u;   // Reduced for better occupancy
+const TILE_DIM_N: u32 = 64u;   
+const TILE_DIM_K: u32 = 32u;   // Increased K tile for better data reuse
+
+const THREAD_TILE_M: u32 = 4u; // Smaller thread tiles for better vectorization
+const THREAD_TILE_N: u32 = 4u;
+
+const WORKGROUP_SIZE_X: u32 = 16u; // TILE_DIM_N / THREAD_TILE_N
+const WORKGROUP_SIZE_Y: u32 = 16u; // TILE_DIM_M / THREAD_TILE_M
+
+// --- Explicit array sizes for WGSL compliance ---
+const TILE_A_SIZE: u32 = (TILE_DIM_M * TILE_DIM_K) / 4u; // for vec4<i32>
+const TILE_B_SIZE: u32 = TILE_DIM_K * TILE_DIM_N;         // for i32
+
+// Shared memory with better alignment
+var<workgroup> tile_a: array<vec4<i32>, TILE_A_SIZE>;
+var<workgroup> tile_b: array<i32, TILE_B_SIZE>;
+
+// Remove LUT and use direct decode function for ternary weights
+fn decode_2bit(val: u32) -> i32 {
+    switch(val) {
+        case 0u: { return -1; }
+        case 1u: { return 0; }
+        case 2u: { return 1; }
+        default: { return 0; } // 0b11 is unused, map to 0
+    }
+}
+
+fn decode_16x2bit_ternary(packed_val: u32) -> array<i32, 16> {
+    var decoded: array<i32, 16>;
+    for (var i: u32 = 0u; i < 16u; i = i + 1u) {
+        let bits = (packed_val >> (i * 2u)) & 0x3u;
+        decoded[i] = decode_2bit(bits);
+    }
+    return decoded;
+}
+
+// Vectorized dot product for better throughput
+fn dot_product_4x4(a: vec4<i32>, b: vec4<i32>) -> i32 {
+    return dot(a, b);
+}
+
+@compute @workgroup_size(WORKGROUP_SIZE_X, WORKGROUP_SIZE_Y, 1)
+fn main(
+    @builtin(workgroup_id) workgroup_id: vec3<u32>,
+    @builtin(local_invocation_id) local_id: vec3<u32>,
+    @builtin(local_invocation_index) local_index: u32
+) {
+    let thread_idx_m = local_id.y;
+    let thread_idx_n = local_id.x;
+    
+    let tile_start_m = workgroup_id.y * TILE_DIM_M;
+    let tile_start_n = workgroup_id.x * TILE_DIM_N;
+    
+    // Vectorized accumulators for better performance  
+    var accumulators: array<vec4<i32>, THREAD_TILE_M>;
+    for (var i = 0u; i < THREAD_TILE_M; i = i + 1u) {
+        accumulators[i] = vec4<i32>(0);
+    }
+    
+    // Main tiling loop with optimizations
+    let num_k_tiles = (metadata.K + TILE_DIM_K - 1u) / TILE_DIM_K;
+    
+    for (var k_tile_idx = 0u; k_tile_idx < num_k_tiles; k_tile_idx = k_tile_idx + 1u) {
+        let k_tile_start = k_tile_idx * TILE_DIM_K;
+        
+        // === Cooperative Loading with Coalescing ===
+        // Load activations with vectorization
+        let total_a_elements = TILE_DIM_M * TILE_DIM_K / 4u;
+        let loads_per_thread_a = (total_a_elements + 255u) / 256u; // Ceiling division
+        
+        for (var i = 0u; i < loads_per_thread_a; i = i + 1u) {
+            let load_idx = i * 256u + local_index;
+            if (load_idx < total_a_elements) {
+                let vec_idx = load_idx;
+                let flat_idx = load_idx * 4u;
+                let m = flat_idx / TILE_DIM_K;
+                let k = flat_idx % TILE_DIM_K;
+                
+                let global_m = tile_start_m + m;
+                let global_k = k_tile_start + k;
+                
+                if (global_m < metadata.M && global_k + 3u < metadata.K) {
+                    // Load 4 activations at once
+                    let base_addr = global_m * metadata.K + global_k;
+                    tile_a[vec_idx] = vec4<i32>(
+                        activations[base_addr],
+                        activations[base_addr + 1u],
+                        activations[base_addr + 2u], 
+                        activations[base_addr + 3u]
+                    );
+                } else {
+                    tile_a[vec_idx] = vec4<i32>(0);
+                }
+            }
+        }
+        
+        // Load and decode weights
+        let total_b_elements = TILE_DIM_N * TILE_DIM_K;
+        let loads_per_thread_b = (total_b_elements + 255u) / 256u;
+        
+        for (var i = 0u; i < loads_per_thread_b; i = i + 1u) {
+            let load_idx = i * 256u + local_index;
+            if (load_idx < total_b_elements && (load_idx % 16u) == 0u) {
+                let n = load_idx / TILE_DIM_K;
+                let k = load_idx % TILE_DIM_K;
+                
+                let global_n = tile_start_n + n;  
+                let global_k_packed_idx = (k_tile_start + k) / 16u;
+                
+                if (global_n < metadata.N && global_k_packed_idx < metadata.K_packed) {
+                    let weight_idx = global_n * metadata.K_packed + global_k_packed_idx;
+                    let packed_w = packed_weights[weight_idx];
+                    let decoded = decode_16x2bit_ternary(packed_w);
+                    // Store decoded weights (unrolled for WGSL compliance)
+                    tile_b[n * TILE_DIM_K + k + 0u] = decoded[0u];
+                    tile_b[n * TILE_DIM_K + k + 1u] = decoded[1u];
+                    tile_b[n * TILE_DIM_K + k + 2u] = decoded[2u];
+                    tile_b[n * TILE_DIM_K + k + 3u] = decoded[3u];
+                    tile_b[n * TILE_DIM_K + k + 4u] = decoded[4u];
+                    tile_b[n * TILE_DIM_K + k + 5u] = decoded[5u];
+                    tile_b[n * TILE_DIM_K + k + 6u] = decoded[6u];
+                    tile_b[n * TILE_DIM_K + k + 7u] = decoded[7u];
+                    tile_b[n * TILE_DIM_K + k + 8u] = decoded[8u];
+                    tile_b[n * TILE_DIM_K + k + 9u] = decoded[9u];
+                    tile_b[n * TILE_DIM_K + k + 10u] = decoded[10u];
+                    tile_b[n * TILE_DIM_K + k + 11u] = decoded[11u];
+                    tile_b[n * TILE_DIM_K + k + 12u] = decoded[12u];
+                    tile_b[n * TILE_DIM_K + k + 13u] = decoded[13u];
+                    tile_b[n * TILE_DIM_K + k + 14u] = decoded[14u];
+                    tile_b[n * TILE_DIM_K + k + 15u] = decoded[15u];
+                } else {
+                    // Pad with zeros
+                    for (var j = 0u; j < 16u; j = j + 1u) {
+                        tile_b[n * TILE_DIM_K + k + j] = 0;
+                    }
+                }
+            }
+        }
+        
+        workgroupBarrier();
+        
+        // === Vectorized Computation ===
+        for (var k_inner = 0u; k_inner < TILE_DIM_K; k_inner = k_inner + 4u) {
+            // Load vectorized activations
+            var a_vecs: array<vec4<i32>, THREAD_TILE_M>;
+            for (var m = 0u; m < THREAD_TILE_M; m = m + 1u) {
+                let base_m = thread_idx_m * THREAD_TILE_M + m;
+                let vec_idx = (base_m * TILE_DIM_K + k_inner) / 4u;
+                let a_i32 = tile_a[vec_idx];
+                a_vecs[m] = a_i32;
+            }
+            
+            // Load vectorized weights and compute
+            for (var n = 0u; n < THREAD_TILE_N; n = n + 1u) {
+                let base_n = thread_idx_n * THREAD_TILE_N + n;
+                let b_vec = vec4<i32>(
+                    tile_b[base_n * TILE_DIM_K + k_inner],
+                    tile_b[base_n * TILE_DIM_K + k_inner + 1u],
+                    tile_b[base_n * TILE_DIM_K + k_inner + 2u],
+                    tile_b[base_n * TILE_DIM_K + k_inner + 3u]
+                );
+                
+                // Vectorized multiply-accumulate
+                for (var m = 0u; m < THREAD_TILE_M; m = m + 1u) {
+                    let dot_result = dot_product_4x4(a_vecs[m], b_vec);
+                    accumulators[m][n] += dot_result;
+                }
+            }
+        }
+        
+        workgroupBarrier();
+    }
+    
+    // === Write Results with Proper Scaling ===
+    for (var m = 0u; m < THREAD_TILE_M; m = m + 1u) {
+        for (var n = 0u; n < THREAD_TILE_N; n = n + 1u) {
+            let global_m = tile_start_m + thread_idx_m * THREAD_TILE_M + m;
+            let global_n = tile_start_n + thread_idx_n * THREAD_TILE_N + n;
+            
+            if (global_m < metadata.M && global_n < metadata.N) {
+                // BitNet B1.58 scaling: result = activation_scale * weight_scale * dot_product
+                let activation_scale = activation_scales[global_m];
+                let weight_scale = weight_scales[global_n];
+                let final_result = f32(accumulators[m][n]) * activation_scale * weight_scale;
+                
+                output[global_m * metadata.N + global_n] = final_result;
+            }
+        }
+    }
+} 
+```
 
 ### Deep Dive 4: bitnet-converter/packer.rs — The Weight Conversion Pipeline
 
-**Why:** The converter is the gatekeeper of correctness for the entire system. If the weights are packed incorrectly, all inference will be wrong.
+**File:** `crates/bitnet-converter/src/packer.rs`
 
-**Informed By:** A direct reverse-engineering of convert_checkpoint.py and pack_weight.py. This utility is the gatekeeper of correctness for the entire system.
+```rust
+// In crates/bitnet-converter/src/packer.rs
 
-**Data Flow Diagram:**
-Tensor<f32> -> [1. Quantize] -> (Tensor<i8>, Tensor<f32>) -> [2. Permutate] -> (Tensor<i8>, ...) -> [3. Pack] -> (Tensor<i8>, ...) -> [4. Interleave] -> (Tensor<i8>, ...) -> Final Saved Artifact
+/// Converts a tensor of f32 weights into our packed ternary format
+pub fn convert_weights_to_ternary(
+    weights: &[f32],
+    shape: &[usize],
+) -> Result<(Vec<i8>, Vec<f32>), ConversionError> {
+    // 1. Quantize to {-1, 0, 1}
+    let (quantized, scales) = quantize_to_ternary(weights, shape)?;
+    
+    // 2. Permute for memory access patterns
+    let permuted = permute_for_kernel_access(&quantized, shape)?;
+    
+    // 3. Pack 4 ternary values into each i8
+    let packed = pack_ternary_values(&permuted)?;
+    
+    // 4. Final interleaving for kernel efficiency
+    let interleaved = interleave_for_kernel(&packed)?;
+    
+    Ok((interleaved, scales))
+}
 
-- **Step 1: Quantize**
-  - Input: f32 weight tensor.
-  - Logic: Implements quant_weight_int8. Calculates per-tensor or per-channel mean, scales values, rounds, and clamps to the set {-1, 0, 1}.
-  - Output: i8 tensor containing only {-1, 0, 1} + f32 scales tensor.
-- **Step 2: Permutate**
-  - Input: i8 quantized tensor.
-  - Logic: Implements permutate_weight_fastest. This is a complex, non-trivial reordering of weight elements to ensure that data accessed by consecutive threads in a kernel is also consecutive in memory, maximizing memory bandwidth.
-  - Output: A new i8 tensor with the same data but a different layout.
-- **Step 3: Pack**
-  - Input: Permuted i8 tensor.
-  - Logic: Maps {-1, 0, 1} to their 2-bit representations (e.g., 01, 00, 10). Uses bitwise shifts and OR operations to pack four of these 2-bit values into a single i8 byte.
-  - Output: i8 tensor, with its size along the packed dimension reduced by a factor of 4.
-- **Step 4: Interleave**
-  - Input: Packed i8 tensor.
-  - Logic: Implements interleave_weight_int8. Performs a final, bit-level shuffle on the packed data to exactly match the memory access pattern the kernel's decoding function expects.
-  - Output: The final i8 tensor to be saved.
+/// Step 1: Quantize f32 weights to {-1, 0, 1} with scaling
+fn quantize_to_ternary(
+    weights: &[f32],
+    shape: &[usize],
+) -> Result<(Vec<i8>, Vec<f32>), ConversionError> {
+    let mut quantized = Vec::with_capacity(weights.len());
+    let mut scales = Vec::with_capacity(shape[0]);  // One scale per output feature
+    
+    for row in weights.chunks(shape[1]) {
+        // Calculate scale for this row
+        let scale = row.iter()
+            .map(|x| x.abs())
+            .sum::<f32>() / row.len() as f32;
+            
+        scales.push(scale);
+        
+        // Quantize using calculated scale
+        for &w in row {
+            let scaled = w / scale;
+            let q = match scaled {
+                x if x < -0.5 => -1i8,
+                x if x > 0.5 => 1i8,
+                _ => 0i8,
+            };
+            quantized.push(q);
+        }
+    }
+    
+    Ok((quantized, scales))
+}
 
-**Validation Strategy:** Each step will be a separate, public function in the packer module. tests within the crate will use small, hand-crafted input tensors and assert that the output of each step matches a pre-calculated, known-good result.
-
----
+// ... rest of the implementation ...
+```
 
 ## Component Descriptions
 
