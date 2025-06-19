@@ -102,15 +102,23 @@ cargo run -p bitnet-app -- --help
 ## Usage Examples
 
 - **Convert a model:**
+
   ```sh
+
   cargo run -p bitnet-converter -- --input-dir models/Original/microsoft/bitnet-b1.58-2B-4T-bf16 --output-dir models/Converted/microsoft/bitnet-b1.58-2B-4T-bf16
   ```
+
 - **Run the app (CLI/GUI):**
+
   ```sh
+
   cargo run -p bitnet-app -- --help
   ```
+
 - **File Combiner Tools:**
+
   ```sh
+
   # Run the GUI version
   cargo run --release -p file_combiner_gui
   
