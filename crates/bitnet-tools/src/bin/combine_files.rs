@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use bitnet_tools::combine::{is_combined_file, file_matches_filter, collect_files, combine_files_to_path};
 use std::fs;
+use bitnet_tools::constants::workspace_root;
 
 fn print_help() {
     println!("Universal File Combiner CLI\n");
@@ -30,10 +31,14 @@ fn main() {
         let gui_rel = "target/release/file_combiner_gui.exe";
         #[cfg(not(target_os = "windows"))]
         let gui_rel = "target/release/file_combiner_gui";
-        let gui_path = std::fs::canonicalize(gui_rel).unwrap_or_else(|_| PathBuf::from(gui_rel));
+        
+        // Use workspace root to find the GUI
+        let workspace = workspace_root();
+        let gui_path = workspace.join(gui_rel);
+        
         if gui_path.exists() {
             println!("Launching GUI: {}", gui_path.display());
-            match Command::new(&gui_path).spawn() {
+            match Command::new(&gui_path).current_dir(&workspace).spawn() {
                 Ok(_) => return,
                 Err(e) => {
                     eprintln!("Failed to launch GUI: {}", e);
@@ -47,17 +52,16 @@ fn main() {
                 .arg("--release")
                 .arg("-p")
                 .arg("file_combiner_gui")
-                .current_dir(".")
+                .current_dir(&workspace)
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit())
                 .status();
             match status {
                 Ok(s) if s.success() => {
                     println!("GUI built successfully.");
-                    let gui_path = std::fs::canonicalize(gui_rel).unwrap_or_else(|_| PathBuf::from(gui_rel));
                     if gui_path.exists() {
                         println!("Launching GUI: {}", gui_path.display());
-                        match Command::new(&gui_path).spawn() {
+                        match Command::new(&gui_path).current_dir(&workspace).spawn() {
                             Ok(_) => return,
                             Err(e) => {
                                 eprintln!("Failed to launch GUI after build: {}", e);
