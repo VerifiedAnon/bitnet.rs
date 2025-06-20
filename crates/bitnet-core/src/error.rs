@@ -65,6 +65,10 @@ pub enum BitNetError {
     DimensionError(String),
 
     /// Error when weight values are invalid (not -1, 0, or +1).
-    #[error("Invalid weight value error: {0}")]
-    WeightError(String),
+    #[error("Invalid weight value: {0}. Must be -1, 0, or 1.")]
+    InvalidWeightValue(i8),
+
+    /// Error when a requested buffer size would exceed device limits.
+    #[error("Requested buffer size ({0} bytes) exceeds device limits.")]
+    BufferSizeExceeded(u64),
 } 

@@ -44,6 +44,7 @@
 
 use bytemuck::{Pod, Zeroable};
 use std::time::Instant;
+use crate::error::BitNetError;
 
 /// Metadata for BitNet kernel execution.
 ///
@@ -115,7 +116,7 @@ pub struct BitnetMetadata {
 /// ];
 /// let (packed, scales) = pack_ternary_weights(&weights);
 /// ```
-pub fn pack_ternary_weights(weights: &[Vec<i8>]) -> (Vec<u32>, Vec<f32>) {
+pub fn pack_ternary_weights(weights: &[Vec<i8>]) -> Result<(Vec<u32>, Vec<f32>), BitNetError> {
     let out_features = weights.len();
     let in_features = weights[0].len();
     let packed_size = (in_features + 15) / 16;
@@ -145,14 +146,14 @@ pub fn pack_ternary_weights(weights: &[Vec<i8>]) -> (Vec<u32>, Vec<f32>) {
                 -1 => 0u32, // 00
                 0 => 1u32,  // 01
                 1 => 2u32,  // 10
-                _ => panic!("Invalid ternary weight value: {}", w),
+                _ => return Err(BitNetError::InvalidWeightValue(w)),
             };
             
             packed_weights[out_idx * packed_size + pack_idx] |= bits << bit_idx;
         }
     }
     
-    (packed_weights, weight_scales)
+    Ok((packed_weights, weight_scales))
 }
 
 /// Calculate per-output-channel weight scaling factors.
@@ -206,7 +207,7 @@ mod tests {
             vec![-1i8, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1, 0],
             vec![1i8, -1, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1],
         ];
-        let (packed, scales) = pack_ternary_weights(&weights);
+        let (packed, scales) = pack_ternary_weights(&weights).unwrap();
         
         // Check packed size
         assert_eq!(packed.len(), 2); // 2 output channels, 16 inputs each = 2 u32s
@@ -254,11 +255,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Invalid ternary weight value")]
     fn test_invalid_weight_value() {
         let t0 = Instant::now();
         let weights = vec![vec![2i8; 16]]; // Invalid weight value
-        pack_ternary_weights(&weights); // This should panic
+        let result = pack_ternary_weights(&weights); // This should return an error
+        assert!(
+            matches!(result, Err(BitNetError::InvalidWeightValue(2))),
+            "Expected InvalidWeightValue error, but got {:?}", result
+        );
         println!("[TEST] test_invalid_weight_value (took {:.2?})", t0.elapsed());
     }
 }
