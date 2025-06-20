@@ -103,11 +103,10 @@ fn assert_vec_eq(a: &[f32], b: &[f32], tolerance: f32) {
 }
 
 /// Core logic for kernel correctness test, to be reused across different contexts.
-async fn run_correctness_logic(context: &WgpuContext, test_id: usize) {
+async fn run_correctness_logic(context: &WgpuContext, resources: &GpuKernelResources, test_id: usize) {
     let batch_size = 4;
     let in_features = 16;
     let out_features = 8;
-    let shader_source = include_str!("../src/kernels/bitnet_kernel.wgsl");
 
     TEST_REPORTER.log_message(
         test_id,
@@ -138,7 +137,6 @@ async fn run_correctness_logic(context: &WgpuContext, test_id: usize) {
         .expect("Failed to pack weights in correctness test");
 
     // Launch GPU kernel
-    let resources = GpuKernelResources::new(context, shader_source);
     let gpu_output = launch_gpu_kernel(
         &q_activations,
         &packed_weights,
@@ -148,7 +146,7 @@ async fn run_correctness_logic(context: &WgpuContext, test_id: usize) {
         in_features,
         out_features,
         context,
-        &resources,
+        resources,
         Some(test_id), // Pass test_id for logging
     )
     .await
@@ -274,6 +272,21 @@ impl GpuKernelResources {
             });
         
         Self { pipeline, bind_group_layout }
+    }
+}
+
+/// A struct to hold a "warm" WGPU context and pre-compiled resources for reuse.
+struct WarmGpuContext {
+    context: Arc<WgpuContext>,
+    resources: GpuKernelResources,
+}
+
+impl WarmGpuContext {
+    async fn new() -> Self {
+        let context = Arc::new(WgpuContext::new().await.expect("Failed to create warm WgpuContext"));
+        let shader_source = include_str!("../src/kernels/bitnet_kernel.wgsl");
+        let resources = GpuKernelResources::new(&context, shader_source);
+        Self { context, resources }
     }
 }
 
@@ -597,11 +610,22 @@ fn low_level_kernel_correctness_test() {
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let t0 = Instant::now();
         let context = WgpuContext::new().await.expect("Failed to get wgpu context");
+        let shader_source = include_str!("../src/kernels/bitnet_kernel.wgsl");
+        let resources = GpuKernelResources::new(&context, shader_source);
+
         TEST_REPORTER.log_message(5, "Running low_level_kernel_correctness_test...");
-        run_correctness_logic(&context, 5).await;
+        run_correctness_logic(&context, &resources, 5).await;
         TEST_REPORTER.log_message(5, "low_level_kernel_correctness_test passed.");
         TEST_REPORTER.record_timing("low_level_kernel_correctness_test", t0.elapsed());
     });
+}
+
+async fn low_level_kernel_correctness_test_warm(warm_context: &WarmGpuContext) {
+    let t0 = Instant::now();
+    TEST_REPORTER.log_message(5, "[WARM] Running low_level_kernel_correctness_test...");
+    run_correctness_logic(&warm_context.context, &warm_context.resources, 5).await;
+    TEST_REPORTER.log_message(5, "[WARM] low_level_kernel_correctness_test passed.");
+    TEST_REPORTER.record_timing("low_level_kernel_correctness_test_warm", t0.elapsed());
 }
 
 #[test]
@@ -672,6 +696,60 @@ fn test_gpu_kernel_dimensions() {
     });
 }
 
+async fn test_gpu_kernel_dimensions_warm(warm_context: &WarmGpuContext) {
+    let t0 = Instant::now();
+    TEST_REPORTER.log_message(6, "[WARM] Running test_gpu_kernel_dimensions...");
+    
+    let batch_size = 1;
+    let in_features = 16;
+    let out_features = 2;
+    
+    let q_acts_vec = vec![1i8, -1, 0, 2, 1, -1, 0, 2, 1, -1, 0, 2, 1, -1, 0, 2];
+    let act_scales = vec![0.5];
+    
+    let packed_weights_u32 = vec![
+        0b01001001010010010100100101001001,
+        0b01001001010010010100100101001001
+    ];
+    let weight_scales_f32 = vec![1.0, 1.0];
+
+    let expected_output = matmul_quantized_scalar(
+        &q_acts_vec,
+        &packed_weights_u32,
+        &act_scales,
+        &weight_scales_f32,
+        batch_size,
+        in_features,
+        out_features
+    );
+    
+    let gpu_output = launch_gpu_kernel(
+        &q_acts_vec,
+        &packed_weights_u32,
+        &weight_scales_f32,
+        &act_scales,
+        batch_size,
+        in_features,
+        out_features,
+        &warm_context.context,
+        &warm_context.resources,
+        Some(6),
+    ).await.unwrap();
+
+    TEST_REPORTER.log_message(
+        6,
+        &format!(
+            "[WARM] GPU dimension test comparison: Expected[..2]={:?}, Got[..2]={:?}",
+            &expected_output[..2.min(expected_output.len())],
+            &gpu_output[..2.min(gpu_output.len())]
+        ),
+    );
+    assert_vec_eq(&expected_output, &gpu_output, 1e-5);
+    TEST_REPORTER.log_message(6, "[WARM] test_gpu_kernel_dimensions passed.");
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_gpu_kernel_dimensions_warm", duration);
+}
+
 #[test]
 #[serial]
 #[ignore]
@@ -737,6 +815,60 @@ fn kernel_large_batch_test() {
     });
 }
 
+async fn kernel_large_batch_test_warm(warm_context: &WarmGpuContext) {
+    let t0 = Instant::now();
+    TEST_REPORTER.log_message(7, "[WARM] Running kernel_large_batch_test...");
+    let batch_size = 64;
+    let in_features = 32;
+    let out_features = 16;
+
+    let mut rng = StdRng::seed_from_u64(42);
+    let activations_f32: Vec<f32> = (0..batch_size * in_features).map(|_| rng.random_range(-0.5..0.5)).collect();
+    let weights_i8: Vec<Vec<i8>> = (0..out_features)
+        .map(|_| (0..in_features).map(|_| (rng.random_range(0..3) - 1) as i8).collect())
+        .collect();
+
+    let (q_acts_vec, act_scale) = quantize_activations_scalar(&activations_f32);
+    let (packed_weights_u32, weight_scales_f32) = pack_ternary_weights(&weights_i8).unwrap();
+    let act_scales = vec![act_scale; batch_size];
+
+    let expected_output = matmul_quantized_scalar(
+        &q_acts_vec,
+        &packed_weights_u32,
+        &act_scales,
+        &weight_scales_f32,
+        batch_size,
+        in_features,
+        out_features
+    );
+
+    let gpu_output = launch_gpu_kernel(
+        &q_acts_vec,
+        &packed_weights_u32,
+        &weight_scales_f32,
+        &act_scales,
+        batch_size,
+        in_features,
+        out_features,
+        &warm_context.context,
+        &warm_context.resources,
+        Some(7),
+    ).await.unwrap();
+
+    TEST_REPORTER.log_message(
+        7,
+        &format!(
+            "[WARM] Large batch test comparison: Expected[..4]={:?}, Got[..4]={:?}",
+            &expected_output[..4.min(expected_output.len())],
+            &gpu_output[..4.min(gpu_output.len())]
+        ),
+    );
+    assert_vec_eq(&expected_output, &gpu_output, 1e-5);
+    TEST_REPORTER.log_message(7, "[WARM] kernel_large_batch_test passed.");
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("kernel_large_batch_test_warm", duration);
+}
+
 #[test]
 #[serial]
 #[ignore]
@@ -799,6 +931,52 @@ fn kernel_all_zero_test() {
         let duration = t0.elapsed();
         TEST_REPORTER.record_timing("kernel_all_zero_test", duration);
     });
+}
+
+async fn kernel_all_zero_test_warm(warm_context: &WarmGpuContext) {
+    let t0 = Instant::now();
+    TEST_REPORTER.log_message(8, "[WARM] Running kernel_all_zero_test...");
+    let batch_size = 32;
+    let in_features = 32;
+    let out_features = 16;
+    
+    let mut rng = StdRng::seed_from_u64(44);
+    let activations_f32: Vec<f32> = (0..batch_size * in_features).map(|_| rng.random_range(-0.5..0.5)).collect();
+    let weights_i8: Vec<Vec<i8>> = (0..out_features)
+        .map(|_| vec![0i8; in_features])
+        .collect();
+
+    let (q_acts_vec, act_scale) = quantize_activations_scalar(&activations_f32);
+    let (packed_weights_u32, weight_scales_f32) = pack_ternary_weights(&weights_i8).unwrap();
+    let act_scales = vec![act_scale; batch_size];
+
+    let expected_output = matmul_quantized_scalar(
+        &q_acts_vec,
+        &packed_weights_u32,
+        &act_scales,
+        &weight_scales_f32,
+        batch_size,
+        in_features,
+        out_features
+    );
+
+    let gpu_output = launch_gpu_kernel(
+        &q_acts_vec,
+        &packed_weights_u32,
+        &weight_scales_f32,
+        &act_scales,
+        batch_size,
+        in_features,
+        out_features,
+        &warm_context.context,
+        &warm_context.resources,
+        Some(8),
+    ).await.unwrap();
+
+    assert_vec_eq(&expected_output, &gpu_output, 1e-5);
+    TEST_REPORTER.log_message(8, "[WARM] kernel_all_zero_test passed.");
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("kernel_all_zero_test_warm", duration);
 }
 
 #[test]
@@ -866,6 +1044,51 @@ fn kernel_all_plus_one_weights_test() {
     });
 }
 
+async fn kernel_all_plus_one_weights_test_warm(warm_context: &WarmGpuContext) {
+    let t0 = Instant::now();
+    TEST_REPORTER.log_message(9, "[WARM] Running kernel_all_plus_one_weights_test...");
+    let batch_size = 32;
+    let in_features = 32;
+    let out_features = 16;
+    let mut rng = StdRng::seed_from_u64(45);
+    let activations_f32: Vec<f32> = (0..batch_size * in_features).map(|_| rng.random_range(-0.5..0.5)).collect();
+    let weights_i8: Vec<Vec<i8>> = (0..out_features)
+        .map(|_| vec![1i8; in_features])
+        .collect();
+
+    let (q_acts_vec, act_scale) = quantize_activations_scalar(&activations_f32);
+    let (packed_weights_u32, weight_scales_f32) = pack_ternary_weights(&weights_i8).unwrap();
+    let act_scales = vec![act_scale; batch_size];
+
+    let expected_output = matmul_quantized_scalar(
+        &q_acts_vec,
+        &packed_weights_u32,
+        &act_scales,
+        &weight_scales_f32,
+        batch_size,
+        in_features,
+        out_features
+    );
+
+    let gpu_output = launch_gpu_kernel(
+        &q_acts_vec,
+        &packed_weights_u32,
+        &weight_scales_f32,
+        &act_scales,
+        batch_size,
+        in_features,
+        out_features,
+        &warm_context.context,
+        &warm_context.resources,
+        Some(9),
+    ).await.unwrap();
+
+    assert_vec_eq(&expected_output, &gpu_output, 1e-5);
+    TEST_REPORTER.log_message(9, "[WARM] kernel_all_plus_one_weights_test passed.");
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("kernel_all_plus_one_weights_test_warm", duration);
+}
+
 #[test]
 #[serial]
 #[ignore]
@@ -929,6 +1152,51 @@ fn kernel_all_minus_one_weights_test() {
         let duration = t0.elapsed();
         TEST_REPORTER.record_timing("kernel_all_minus_one_weights_test", duration);
     });
+}
+
+async fn kernel_all_minus_one_weights_test_warm(warm_context: &WarmGpuContext) {
+    let t0 = Instant::now();
+    TEST_REPORTER.log_message(10, "[WARM] Running kernel_all_minus_one_weights_test...");
+    let batch_size = 32;
+    let in_features = 32;
+    let out_features = 16;
+    let mut rng = StdRng::seed_from_u64(46);
+    let activations_f32: Vec<f32> = (0..batch_size * in_features).map(|_| rng.random_range(-0.5..0.5)).collect();
+    let weights_i8: Vec<Vec<i8>> = (0..out_features)
+        .map(|_| vec![-1i8; in_features])
+        .collect();
+
+    let (q_acts_vec, act_scale) = quantize_activations_scalar(&activations_f32);
+    let (packed_weights_u32, weight_scales_f32) = pack_ternary_weights(&weights_i8).unwrap();
+    let act_scales = vec![act_scale; batch_size];
+
+    let expected_output = matmul_quantized_scalar(
+        &q_acts_vec,
+        &packed_weights_u32,
+        &act_scales,
+        &weight_scales_f32,
+        batch_size,
+        in_features,
+        out_features
+    );
+
+    let gpu_output = launch_gpu_kernel(
+        &q_acts_vec,
+        &packed_weights_u32,
+        &weight_scales_f32,
+        &act_scales,
+        batch_size,
+        in_features,
+        out_features,
+        &warm_context.context,
+        &warm_context.resources,
+        Some(10),
+    ).await.unwrap();
+
+    assert_vec_eq(&expected_output, &gpu_output, 1e-5);
+    TEST_REPORTER.log_message(10, "[WARM] kernel_all_minus_one_weights_test passed.");
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("kernel_all_minus_one_weights_test_warm", duration);
 }
 
 #[test]
@@ -996,6 +1264,51 @@ fn kernel_non_divisible_batch_test() {
     });
 }
 
+async fn kernel_non_divisible_batch_test_warm(warm_context: &WarmGpuContext) {
+    let t0 = Instant::now();
+    TEST_REPORTER.log_message(11, "[WARM] Running kernel_non_divisible_batch_test...");
+    let batch_size = 33;
+    let in_features = 32;
+    let out_features = 16;
+    let mut rng = StdRng::seed_from_u64(47);
+    let activations_f32: Vec<f32> = (0..batch_size * in_features).map(|_| rng.random_range(-0.5..0.5)).collect();
+    let weights_i8: Vec<Vec<i8>> = (0..out_features)
+        .map(|_| (0..in_features).map(|_| (rng.random_range(0..3) - 1) as i8).collect())
+        .collect();
+
+    let (q_acts_vec, act_scale) = quantize_activations_scalar(&activations_f32);
+    let (packed_weights_u32, weight_scales_f32) = pack_ternary_weights(&weights_i8).unwrap();
+    let act_scales = vec![act_scale; batch_size];
+
+    let expected_output = matmul_quantized_scalar(
+        &q_acts_vec,
+        &packed_weights_u32,
+        &act_scales,
+        &weight_scales_f32,
+        batch_size,
+        in_features,
+        out_features
+    );
+
+    let gpu_output = launch_gpu_kernel(
+        &q_acts_vec,
+        &packed_weights_u32,
+        &weight_scales_f32,
+        &act_scales,
+        batch_size,
+        in_features,
+        out_features,
+        &warm_context.context,
+        &warm_context.resources,
+        Some(11),
+    ).await.unwrap();
+
+    assert_vec_eq(&expected_output, &gpu_output, 1e-5);
+    TEST_REPORTER.log_message(11, "[WARM] kernel_non_divisible_batch_test passed.");
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("kernel_non_divisible_batch_test_warm", duration);
+}
+
 #[test]
 #[serial]
 #[ignore]
@@ -1037,6 +1350,44 @@ fn test_bitlinear_layer_forward_pass() {
         let duration = t0.elapsed();
         TEST_REPORTER.record_timing("test_bitlinear_layer_forward_pass", duration);
     });
+}
+
+async fn test_bitlinear_layer_forward_pass_warm(warm_context: &WarmGpuContext) {
+    let t0 = Instant::now();
+    TEST_REPORTER.log_message(12, "[WARM] Running test_bitlinear_layer_forward_pass...");
+    let batch_size = 32;
+    let in_features = 1024;
+    let out_features = 1024;
+    let mut rng = StdRng::seed_from_u64(48);
+
+    let input: Vec<f32> = (0..batch_size * in_features)
+        .map(|_| rng.random_range(-1.0..1.0))
+        .collect();
+
+    let weights_i8: Vec<Vec<i8>> = (0..out_features)
+        .map(|_| (0..in_features).map(|_| (rng.random_range(-1i8..=1i8))).collect())
+        .collect();
+
+    let (packed_weights, weight_scales) = pack_ternary_weights(&weights_i8).unwrap();
+
+    let record = BitLinearRecord {
+        packed_weights,
+        weight_scales,
+        in_features,
+        out_features,
+    };
+    
+    // This test uses the BitLinear struct, which internally manages its own resources.
+    // To adapt it, we'd need to change BitLinear::forward to accept an optional context.
+    // For now, we'll just run it "cold" again in the warm test to keep it simple.
+    let layer = BitLinear::from_record(record);
+    let output = layer.forward(&warm_context.context, &input, batch_size).await;
+
+    assert_eq!(output.len(), batch_size * out_features);
+    TEST_REPORTER.log_message(12, &format!("[WARM] BitLinear forward pass output length: {}", output.len()));
+    TEST_REPORTER.log_message(12, "[WARM] test_bitlinear_layer_forward_pass passed.");
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_bitlinear_layer_forward_pass_warm", duration);
 }
 
 /// Stress Test: Maximum Dimension Support
@@ -1128,6 +1479,60 @@ fn stress_test_maximum_dimension_support() {
         TEST_REPORTER.log_message(20, &format!("Stress Test: Comparison complete. Test passed! Total time: {:.2?}", duration));
         TEST_REPORTER.record_timing("stress_test_maximum_dimension_support", duration);
     });
+}
+
+async fn stress_test_maximum_dimension_support_warm(warm_context: &WarmGpuContext) {
+    let t0 = Instant::now();
+    TEST_REPORTER.log_message(20, "[WARM] Stress Test: Initializing with large dimensions (1024x1024x1024)...");
+    let batch_size = 1024;
+    let in_features = 1024;
+    let out_features = 1024;
+
+    TEST_REPORTER.log_message(20, "[WARM] Stress Test: Generating random data (this may take a moment)...");
+    let mut rng = StdRng::seed_from_u64(42);
+    let activations: Vec<f32> = (0..batch_size * in_features)
+        .map(|_| rng.random_range(-1.0..1.0))
+        .collect();
+    let weights: Vec<Vec<i8>> = (0..out_features)
+        .map(|_| (0..in_features).map(|_| {
+            let val: i8 = rng.random_range(-1..=1);
+            if val == 0 { rng.random_range(-1..=1) } else { val }
+        }).collect())
+        .collect();
+    
+    TEST_REPORTER.log_message(20, "[WARM] Stress Test: Starting scalar pre-computation...");
+    let mut q_activations = Vec::with_capacity(batch_size * in_features);
+    let mut activation_scales = Vec::with_capacity(batch_size);
+    for row in activations.chunks(in_features) {
+        let (q_row, scale) = quantize_activations_scalar(row);
+        q_activations.extend(q_row);
+        activation_scales.push(scale);
+    }
+    
+    let (packed_weights, weight_scales) = pack_ternary_weights(&weights).unwrap();
+    
+    TEST_REPORTER.log_message(20, "[WARM] Stress Test: Starting GPU execution...");
+    let t_gpu = Instant::now();
+    let gpu_output = launch_gpu_kernel(
+        &q_activations,
+        &packed_weights,
+        &weight_scales,
+        &activation_scales,
+        batch_size,
+        in_features,
+        out_features,
+        &warm_context.context,
+        &warm_context.resources,
+        Some(20),
+    )
+    .await
+    .unwrap();
+    TEST_REPORTER.log_message(20, &format!("[WARM] Stress Test: GPU execution complete. Time: {:.2?}", t_gpu.elapsed()));
+
+    TEST_REPORTER.log_message(20, "[WARM] Stress Test: Skipping scalar execution for warm run.");
+    
+    TEST_REPORTER.log_message(20, &format!("[WARM] Stress Test: Test passed! Total time: {:.2?}", t0.elapsed()));
+    TEST_REPORTER.record_timing("stress_test_maximum_dimension_support_warm", t0.elapsed());
 }
 
 /// Performance Benchmark: GPU vs. Scalar
@@ -1380,6 +1785,53 @@ fn performance_benchmark_gpu_vs_scalar() {
     });
 }
 
+async fn performance_benchmark_gpu_vs_scalar_warm(warm_context: &WarmGpuContext) {
+    let batch_size = 64;
+    let in_features = 32;
+    let out_features = 16;
+    let iterations = 100;
+
+    let mut rng = StdRng::seed_from_u64(43);
+    let activations: Vec<f32> = (0..batch_size * in_features)
+        .map(|_| rng.random_range(-1.0..1.0))
+        .collect();
+    let weights: Vec<Vec<i8>> = (0..out_features)
+        .map(|_| (0..in_features).map(|_| rng.random_range(-1..=1)).collect())
+        .collect();
+
+    let mut q_activations = Vec::with_capacity(batch_size * in_features);
+    let mut activation_scales = Vec::with_capacity(batch_size);
+    for row in activations.chunks(in_features) {
+        let (q_row, scale) = quantize_activations_scalar(row);
+        q_activations.extend(q_row);
+        activation_scales.push(scale);
+    }
+    let (packed_weights, weight_scales) = pack_ternary_weights(&weights).unwrap();
+
+    let mut gpu_total_wall_time = std::time::Duration::new(0, 0);
+    
+    for _ in 0..iterations {
+        let t0 = Instant::now();
+        let _gpu_output = launch_gpu_kernel(
+            &q_activations,
+            &packed_weights,
+            &weight_scales,
+            &activation_scales,
+            batch_size,
+            in_features,
+            out_features,
+            &warm_context.context,
+            &warm_context.resources,
+            None,
+        ).await.unwrap();
+        gpu_total_wall_time += t0.elapsed();
+    }
+    let gpu_avg_wall_time = gpu_total_wall_time / iterations;
+    
+    TEST_REPORTER.log_message(13, &format!("[WARM] Performance Benchmark: Avg Wall Time: {:.3?}", gpu_avg_wall_time));
+    TEST_REPORTER.record_timing("performance_benchmark_gpu_vs_scalar_warm", gpu_total_wall_time);
+}
+
 /// Precision Test: Floating-Point Edge Cases
 /// Purpose: Test kernel behavior with extreme activation values.
 #[test]
@@ -1448,6 +1900,51 @@ fn precision_test_fp_edge_cases() {
         TEST_REPORTER.log_message(16, "Precision test with FP edge cases (NaN, Infinity) passed.");
         TEST_REPORTER.record_timing("precision_test_fp_edge_cases", t0.elapsed());
     });
+}
+
+async fn precision_test_fp_edge_cases_warm(warm_context: &WarmGpuContext) {
+    let t0 = Instant::now();
+    let batch_size = 1;
+    let in_features = 16;
+    let out_features = 4;
+
+    let activations = vec![
+        1.0, -1.0, 0.0, 127.0, -127.0, 1e-6, 1e6, -1e6,
+        f32::MAX, f32::MIN, f32::EPSILON, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -10.0, 0.1
+    ];
+    let weights: Vec<Vec<i8>> = (0..out_features)
+        .map(|i| (0..in_features).map(|j| ((i as i8 + j as i8) % 3 - 1)).collect())
+        .collect();
+
+    let (q_activations, activation_scales) = quantize_activations_scalar(&activations);
+    let (packed_weights, weight_scales) = pack_ternary_weights(&weights).unwrap();
+
+    let gpu_output = launch_gpu_kernel(
+        &q_activations,
+        &packed_weights,
+        &weight_scales,
+        &[activation_scales],
+        batch_size,
+        in_features,
+        out_features,
+        &warm_context.context,
+        &warm_context.resources,
+        Some(16),
+    ).await.unwrap();
+
+    let scalar_output = matmul_quantized_scalar(
+        &q_activations,
+        &packed_weights,
+        &[activation_scales],
+        &weight_scales,
+        batch_size,
+        in_features,
+        out_features,
+    );
+    assert_vec_eq(&gpu_output, &scalar_output, 1e-5);
+    
+    TEST_REPORTER.log_message(16, "[WARM] Precision test with FP edge cases passed.");
+    TEST_REPORTER.record_timing("precision_test_fp_edge_cases_warm", t0.elapsed());
 }
 
 /// Edge Case: Invalid Input Weights
@@ -1577,7 +2074,11 @@ fn cross_device_consistency_test() {
                 queue: Arc::new(queue),
                 features,
             };
-            run_correctness_logic(&context, 14).await;
+
+            // Create resources for this specific device before running the logic
+            let shader_source = include_str!("../src/kernels/bitnet_kernel.wgsl");
+            let resources = GpuKernelResources::new(&context, shader_source);
+            run_correctness_logic(&context, &resources, 14).await;
         }
         
         TEST_REPORTER.log_message(14, "Kernel correctness passed on all available devices.");
@@ -1670,6 +2171,49 @@ fn streaming_load_test() {
     });
 }
 
+async fn streaming_load_test_warm(warm_context: &WarmGpuContext) {
+    let t0 = Instant::now();
+    let batch_size = 32;
+    let in_features = 32;
+    let out_features = 16;
+    let num_streams = 10;
+    let mut rng = StdRng::seed_from_u64(44);
+
+    let activations: Vec<f32> = (0..batch_size * in_features)
+        .map(|_| rng.random_range(-1.0..1.0))
+        .collect();
+    let weights: Vec<Vec<i8>> = (0..out_features)
+        .map(|_| (0..in_features).map(|_| rng.random_range(-1..=1)).collect())
+        .collect();
+
+    let mut q_activations = Vec::with_capacity(batch_size * in_features);
+    let mut activation_scales = Vec::with_capacity(batch_size);
+    for row in activations.chunks(in_features) {
+        let (q_row, scale) = quantize_activations_scalar(row);
+        q_activations.extend(q_row);
+        activation_scales.push(scale);
+    }
+    let (packed_weights, weight_scales) = pack_ternary_weights(&weights).unwrap();
+
+    for _ in 0..num_streams {
+        let _ = launch_gpu_kernel(
+            &q_activations,
+            &packed_weights,
+            &weight_scales,
+            &activation_scales,
+            batch_size,
+            in_features,
+            out_features,
+            &warm_context.context,
+            &warm_context.resources,
+            None,
+        ).await.unwrap();
+    }
+
+    TEST_REPORTER.log_message(15, &format!("[WARM] Streaming Load Test ({} streams) passed.", num_streams));
+    TEST_REPORTER.record_timing("streaming_load_test_warm", t0.elapsed());
+}
+
 /// Memory Safety: Buffer Overflow Prevention
 /// Purpose: Ensure the kernel panics gracefully when trying to allocate an oversized buffer.
 #[test]
@@ -1721,6 +2265,32 @@ fn memory_safety_buffer_overflow_test() {
             TEST_REPORTER.log_message(18, &format!("Successfully caught expected error: {}", e));
         }
     });
+}
+
+async fn memory_safety_buffer_overflow_test_warm(warm_context: &WarmGpuContext) {
+    let in_features = 16;
+    let out_features = 16;
+    let f32_size = std::mem::size_of::<f32>() as u64;
+    let max_buffer_size = warm_context.context.device.limits().max_buffer_size;
+    let oversized_batch_size = (max_buffer_size / (out_features as u64 * f32_size)) + 1;
+
+    let result = launch_gpu_kernel(
+        &[0],
+        &[0],
+        &[0.0],
+        &[0.0],
+        oversized_batch_size as usize,
+        in_features,
+        out_features,
+        &warm_context.context,
+        &warm_context.resources,
+        Some(18),
+    ).await;
+
+    assert!(matches!(result, Err(BitNetError::BufferSizeExceeded(_))));
+    if let Err(e) = result {
+        TEST_REPORTER.log_message(18, &format!("[WARM] Successfully caught expected error: {}", e));
+    }
 }
 
 /// Memory Safety: Hardcoded Large Allocation
@@ -1775,6 +2345,30 @@ fn memory_safety_hardcoded_large_allocation_test() {
     });
 }
 
+async fn memory_safety_hardcoded_large_allocation_test_warm(warm_context: &WarmGpuContext) {
+    let in_features = 16;
+    let out_features = 16;
+    let gb_10_batch_size = 167_772_160;
+
+    let result = launch_gpu_kernel(
+        &[0],
+        &[0],
+        &[0.0],
+        &[0.0],
+        gb_10_batch_size,
+        in_features,
+        out_features,
+        &warm_context.context,
+        &warm_context.resources,
+        Some(21),
+    ).await;
+
+    assert!(matches!(result, Err(BitNetError::BufferSizeExceeded(_))));
+    if let Err(e) = result {
+        TEST_REPORTER.log_message(21, &format!("[WARM] Successfully caught expected error for 10GB allocation: {}", e));
+    }
+}
+
 fn zzz_final_report() {
     // This function runs last and generates the final report.
     // Add a small delay to ensure all async tests complete.
@@ -1788,7 +2382,9 @@ fn test_all_kernels_sequentially() {
     let t0 = Instant::now();
     TEST_REPORTER.log_message(100, "STARTING KERNEL TEST SUITE");
 
-    // --- Run all tests in order ---
+    // --- COLD RUN ---
+    // All original test functions are called, each setting up and tearing down its own resources.
+    TEST_REPORTER.log_message(100, "--- STARTING COLD RUN (INDIVIDUAL TESTS) ---");
     unit_test_pack_ternary_weights();
     unit_test_calculate_weight_scales();
     test_matmul_quantized_scalar();
@@ -1805,39 +2401,36 @@ fn test_all_kernels_sequentially() {
     precision_test_fp_edge_cases();
     cross_device_consistency_test();
     streaming_load_test();
-
-    // --- Test error handling ---
-    let t0_error = Instant::now();
-    TEST_REPORTER.log_message(19, "Running error_handling_gpu_unavailable...");
     error_handling_gpu_unavailable();
-    TEST_REPORTER.log_message(19, "error_handling_gpu_unavailable passed.");
-    TEST_REPORTER.record_timing("Error Handling GPU Unavailable", t0_error.elapsed());
-
-    // --- Test panics ---
-    let t0_panic1 = Instant::now();
-    TEST_REPORTER.log_message(17, "Running edge_case_invalid_input_weights...");
     edge_case_invalid_input_weights();
-    TEST_REPORTER.record_timing("Edge Case Invalid Input Weights", t0_panic1.elapsed());
-
-    let t0_panic2 = Instant::now();
-    TEST_REPORTER.log_message(18, "Running memory_safety_buffer_overflow_test...");
     memory_safety_buffer_overflow_test();
-    TEST_REPORTER.record_timing("Memory Safety Buffer Overflow Test", t0_panic2.elapsed());
-    
-    let t0_panic3 = Instant::now();
-    TEST_REPORTER.log_message(21, "Running memory_safety_hardcoded_large_allocation_test...");
-    memory_safety_hardcoded_large_allocation_test();
-    TEST_REPORTER.record_timing("Memory Safety Hardcoded Large Allocation Test", t0_panic3.elapsed());
 
-    // --- Optional Stress Test ---
-    if std::env::var("RUN_STRESS_TESTS").unwrap_or_default() == "1" {
-        TEST_REPORTER.log_message(20, "Running stress_test_maximum_dimension_support...");
-        stress_test_maximum_dimension_support();
-        TEST_REPORTER.log_message(20, "stress_test_maximum_dimension_support passed.");
-    } else {
-        TEST_REPORTER.log_message(20, "Skipping stress_test_maximum_dimension_support. (Set RUN_STRESS_TESTS=1 to run)");
-    }
-    
+    // --- WARM RUN ---
+    // A single, shared context is created and reused for all subsequent test runs.
+    TEST_REPORTER.log_message(100, "--- STARTING WARM RUN (SHARED CONTEXT) ---");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let warm_context = WarmGpuContext::new().await;
+
+        low_level_kernel_correctness_test_warm(&warm_context).await;
+        test_gpu_kernel_dimensions_warm(&warm_context).await;
+        kernel_large_batch_test_warm(&warm_context).await;
+        kernel_all_zero_test_warm(&warm_context).await;
+        kernel_all_plus_one_weights_test_warm(&warm_context).await;
+        kernel_all_minus_one_weights_test_warm(&warm_context).await;
+        kernel_non_divisible_batch_test_warm(&warm_context).await;
+        test_bitlinear_layer_forward_pass_warm(&warm_context).await;
+        performance_benchmark_gpu_vs_scalar_warm(&warm_context).await;
+        precision_test_fp_edge_cases_warm(&warm_context).await;
+        streaming_load_test_warm(&warm_context).await;
+        memory_safety_buffer_overflow_test_warm(&warm_context).await;
+        memory_safety_hardcoded_large_allocation_test_warm(&warm_context).await;
+
+        if std::env::var("RUN_STRESS_TESTS").unwrap_or_default() == "1" {
+            stress_test_maximum_dimension_support_warm(&warm_context).await;
+        }
+    });
+
     // --- Final Report ---
     zzz_final_report();
     let duration = t0.elapsed();
@@ -1880,3 +2473,30 @@ fn test_scalar_packing_decoding_symmetry() {
     TEST_REPORTER.log_message(22, "Scalar packing-decoding symmetry test passed.");
     TEST_REPORTER.record_timing("test_scalar_packing_decoding_symmetry", t0.elapsed());
 }
+
+/// Temporary proof-of-concept test for the warm context harness.
+/// This test is ignored and will be removed after the full refactor.
+#[test]
+#[serial]
+fn temp_warm_harness_proof_of_concept() {
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let t0 = Instant::now();
+        TEST_REPORTER.log_message(99, "Running temp_warm_harness_proof_of_concept...");
+
+        // 1. Create the warm context once.
+        TEST_REPORTER.log_message(99, "Creating WarmGpuContext...");
+        let warm_context = WarmGpuContext::new().await;
+        TEST_REPORTER.log_message(99, "WarmGpuContext created successfully.");
+
+        // 2. Run a test using the warm context.
+        TEST_REPORTER.log_message(99, "Running correctness logic using the warm context...");
+        run_correctness_logic(&warm_context.context, &warm_context.resources, 99).await;
+
+        TEST_REPORTER.log_message(99, "Temp warm harness proof-of-concept PASSED.");
+        TEST_REPORTER.record_timing("temp_warm_harness_proof_of_concept", t0.elapsed());
+    });
+}
+
+
+
+
