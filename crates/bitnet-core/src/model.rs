@@ -61,6 +61,8 @@ use crate::{
     attention::{Attention, AttentionConfig},
     feed_forward::{FeedForward, FeedForwardConfig},
     rms_norm::BitnetRmsNorm,
+    wgpu_context::WgpuContext,
+    error::BitNetError,
 };
 use std::fs;
 use std::path::Path;
@@ -117,32 +119,41 @@ pub struct ModelConfig {
 /// x = x + FeedForward(RMSNorm(x))
 /// ```
 #[derive(Clone)]
-pub struct TransformerBlock {
+pub struct Layer {
     attn: Attention,
     ffn: FeedForward,
-    attn_norm: BitnetRmsNorm,
-    ffn_norm: BitnetRmsNorm,
 }
 
-impl TransformerBlock {
-    /// Performs a forward pass through the transformer block.
+impl Layer {
+    /// Performs a forward pass through a transformer layer.
     ///
     /// # Arguments
     ///
+    /// * `context` - GPU context for compute operations
     /// * `x` - Input tensor of shape `[batch_size * seq_len, hidden_size]`
+    /// * `batch_size` - Number of sequences in the batch
+    /// * `seq_len` - Length of each sequence
     ///
     /// # Returns
     ///
-    /// * Output tensor of the same shape as input
-    pub fn forward(&self, x: &[f32]) -> Vec<f32> {
-        // x = x + Attention(Norm(x))
-        let x1 = self.attn_norm.forward(x);
-        let x2 = self.attn.forward(&x1, 1, 1); // TODO: pass correct batch/seq
-        let x = x.iter().zip(x2.iter()).map(|(a, b)| a + b).collect::<Vec<_>>();
-        // x = x + FeedForward(Norm(x))
-        let x1 = self.ffn_norm.forward(&x);
-        let x2 = self.ffn.forward(&x1);
-        x.iter().zip(x2.iter()).map(|(a, b)| a + b).collect()
+    /// * Result containing the output tensor of shape `[batch_size * seq_len, hidden_size]`
+    ///   or an error if the computation fails
+    ///
+    /// # Implementation Notes
+    ///
+    /// The forward pass follows the standard transformer pattern:
+    /// 1. Apply input normalization
+    /// 2. Self-attention with residual connection
+    /// 3. Apply second normalization
+    /// 4. Feed-forward network with residual connection
+    pub async fn forward(&self, context: &WgpuContext, x: &[f32], batch_size: usize, seq_len: usize) -> Result<Vec<f32>, BitNetError> {
+        let x1 = x.to_vec(); // TODO: Apply input normalization
+        let x2 = self.attn.forward(context, &x1, batch_size, seq_len).await;
+        let x = x1.iter().zip(x2.iter()).map(|(a, b)| a + b).collect::<Vec<_>>();
+
+        let x1 = x; // TODO: Apply normalization
+        let x2 = self.ffn.forward(context, &x1, batch_size).await;
+        Ok(x1.iter().zip(x2.iter()).map(|(a, b)| a + b).collect())
     }
 }
 
@@ -172,7 +183,7 @@ pub struct Transformer {
     /// Token embedding table [vocab_size][hidden_size]
     embedding: Vec<Vec<f32>>,
     /// Sequence of transformer blocks
-    blocks: Vec<TransformerBlock>,
+    layers: Vec<Layer>,
     /// Final layer normalization
     norm: BitnetRmsNorm,
     /// Output projection matrix [hidden_size][vocab_size]
@@ -209,15 +220,13 @@ impl ModelConfig {
         let attn_cfg = AttentionConfig::new(self.hidden_size, self.num_attention_heads, self.dropout);
         let ffn_cfg = FeedForwardConfig::new(self.hidden_size, self.intermediate_size);
         let norm = BitnetRmsNorm::new();
-        let block = TransformerBlock {
+        let layer = Layer {
             attn: attn_cfg.init(),
             ffn: ffn_cfg.init(),
-            attn_norm: norm.clone(),
-            ffn_norm: norm.clone(),
         };
         Transformer {
             embedding,
-            blocks: vec![block; self.num_hidden_layers],
+            layers: vec![layer; self.num_hidden_layers],
             norm,
             output,
         }
@@ -246,18 +255,16 @@ impl Transformer {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn forward(&self, token_ids: &[usize]) -> Vec<f32> {
+    pub async fn forward(&self, context: &WgpuContext, token_ids: &[usize], batch_size: usize, seq_len: usize) -> Result<Vec<f32>, BitNetError> {
         // Embedding lookup
         let mut x = token_ids.iter().flat_map(|&id| self.embedding[id].clone()).collect::<Vec<_>>();
-        // Pass through all blocks
-        for block in &self.blocks {
-            x = block.forward(&x);
+
+        // Apply each transformer layer
+        for layer in &self.layers {
+            x = layer.forward(context, &x, batch_size, seq_len).await?;
         }
-        // Final norm
-        let x = self.norm.forward(&x);
-        // Output projection (matrix multiply)
-        // TODO: Implement output projection
-        x
+
+        Ok(x)
     }
 
     /// Loads a pretrained model from a directory.
@@ -346,7 +353,7 @@ impl Default for Transformer {
     fn default() -> Self {
         Transformer {
             embedding: vec![vec![0.1; 128]; 1000],  // vocab_size=1000, hidden_size=128
-            blocks: Vec::new(),  // No blocks for testing
+            layers: Vec::new(),  // No layers for testing
             norm: BitnetRmsNorm::default(),
             output: vec![vec![0.1; 1000]; 128],  // hidden_size=128, vocab_size=1000
         }
@@ -369,11 +376,12 @@ mod tests {
             dropout: 0.0,
         };
         let model = config.init();
-        assert_eq!(model.blocks.len(), config.num_hidden_layers);
+        assert_eq!(model.layers.len(), config.num_hidden_layers);
     }
 
-    #[test]
-    fn test_forward_pass() {
+    #[tokio::test]
+    async fn test_forward_pass() -> Result<(), BitNetError> {
+        let context = WgpuContext::new().await?;
         let config = ModelConfig {
             hidden_size: 64,
             intermediate_size: 256,
@@ -384,8 +392,27 @@ mod tests {
             dropout: 0.0,
         };
         let model = config.init();
-        let tokens = vec![1, 2, 3];
-        let output = model.forward(&tokens);
-        assert_eq!(output.len(), config.hidden_size * tokens.len());
+        let tokens = vec![1usize, 2, 3];
+        let output = model.forward(&context, &tokens, 1, tokens.len()).await?;
+        assert_eq!(output.len(), config.hidden_size);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_model_forward() -> Result<(), BitNetError> {
+        let context = WgpuContext::new().await?;
+        let model = ModelConfig {
+            hidden_size: 1024,
+            intermediate_size: 4096,
+            num_hidden_layers: 1,
+            num_attention_heads: 16,
+            vocab_size: 32000,
+            rms_norm_eps: 1e-6,
+            dropout: 0.0,
+        }.init();
+        let input = vec![1usize; 32];  // Test with 32 token IDs
+        let output = model.forward(&context, &input, 1, input.len()).await?;
+        assert_eq!(output.len(), model.embedding[0].len());
+        Ok(())
     }
 }

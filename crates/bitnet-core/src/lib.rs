@@ -110,6 +110,7 @@ pub mod rms_norm;
 
 /// Error types and handling for BitNet operations.
 pub mod error;
+pub mod wgpu_context;
 pub mod kernels;
 pub mod settings;
 pub mod tokenizer;

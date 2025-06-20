@@ -14,25 +14,36 @@ use bincode::serde::decode_from_slice;
 use bincode::config::standard;
 use safetensors::{SafeTensors, Dtype};
 use half::bf16;
+use bitnet_tools::test_utils::TestReporter;
+use lazy_static::lazy_static;
+
+// Initialize test reporter
+lazy_static! {
+    static ref TEST_REPORTER: TestReporter = TestReporter::new("pipeline_integration")
+        .expect("Failed to create test reporter");
+}
+
 
 #[test]
 #[serial]
 #[ignore]
 fn test_model_files_present() {
     let t0 = Instant::now();
-    println!("[TEST] Ensuring model files are present (downloading if needed)...");
+    TEST_REPORTER.log_message(1, "Ensuring model files are present (downloading if needed)...");
     get_model(Some(DEFAULT_MODEL_ID)).expect("Failed to get or download model files");
-    println!("[TEST] Model files ready (took {:.2?})", t0.elapsed());
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_model_files_present", duration);
+    TEST_REPORTER.log_message(1, &format!("Model files ready (took {:.2?})", duration));
 }
 
 #[test]
 #[serial]
 #[ignore]
 fn test_conversion_outputs_blocks() {
+    let t0 = Instant::now();
+    TEST_REPORTER.log_message(2, "Running conversion and checking per-block outputs...");
     get_model(Some(DEFAULT_MODEL_ID)).expect("Failed to get or download model files");
 
-    let t0 = Instant::now();
-    println!("[TEST] Running conversion and checking per-block outputs...");
     let input_dir = original_dir().join(DEFAULT_MODEL_ID);
     let output_dir = converted_dir().join(DEFAULT_MODEL_ID);
     let _ = convert_model_on_disk(
@@ -48,16 +59,18 @@ fn test_conversion_outputs_blocks() {
     // Check for at least one block file
     let block0 = output_dir.join("block_0.bin");
     assert!(block0.exists(), "Expected block_0.bin to exist");
-    println!("[TEST] Conversion and block outputs check passed (took {:.2?})", t0.elapsed());
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_conversion_outputs_blocks", duration);
+    TEST_REPORTER.log_message(2, &format!("Conversion and block outputs check passed (took {:.2?})", duration));
 }
 
 #[test]
 #[serial]
 #[ignore]
 fn test_load_some_blocks() {
-    get_model(Some(DEFAULT_MODEL_ID)).expect("Failed to get or download model files");
     let t0 = Instant::now();
-    println!("[TEST] Loading and deserializing some per-block files...");
+    TEST_REPORTER.log_message(3, "Loading and deserializing some per-block files...");
+    get_model(Some(DEFAULT_MODEL_ID)).expect("Failed to get or download model files");
     let output_dir = converted_dir().join(DEFAULT_MODEL_ID);
     // Try to load embedding, norm, lm_head, and first 2 blocks
     let files = [
@@ -75,15 +88,18 @@ fn test_load_some_blocks() {
         // If decode fails, try as bincode for the known types
         // (We don't know the exact type here, so just check that it's not corrupt)
     }
-    println!("[TEST] Per-block file load/deserialization check passed (took {:.2?})", t0.elapsed());
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_load_some_blocks", duration);
+    TEST_REPORTER.log_message(3, &format!("Per-block file load/deserialization check passed (took {:.2?})", duration));
 }
 
 #[test]
 #[serial]
 #[ignore]
 fn test_required_files_present() {
-    get_model(Some(DEFAULT_MODEL_ID)).expect("Failed to get or download model files");
     let t0 = Instant::now();
+    TEST_REPORTER.log_message(4, "Checking for required model files...");
+    get_model(Some(DEFAULT_MODEL_ID)).expect("Failed to get or download model files");
     let input_dir = original_dir().join(DEFAULT_MODEL_ID);
     let expect_files = [
         CONFIG_JSON,
@@ -97,29 +113,35 @@ fn test_required_files_present() {
         let path = input_dir.join(f);
         assert!(path.exists(), "Required file missing: {}", f);
     }
-    println!("[TEST] test_required_files_present (took {:.2?})", t0.elapsed());
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_required_files_present", duration);
+    TEST_REPORTER.log_message(4, &format!("Required files check passed (took {:.2?})", duration));
 }
 
 #[test]
 #[serial]
 #[ignore]
 fn test_config_json_parsing() {
-    get_model(Some(DEFAULT_MODEL_ID)).expect("Failed to get or download model files");
     let t0 = Instant::now();
+    TEST_REPORTER.log_message(5, "Parsing config.json...");
+    get_model(Some(DEFAULT_MODEL_ID)).expect("Failed to get or download model files");
     let input_dir = original_dir().join(DEFAULT_MODEL_ID);
     let config_path = input_dir.join(CONFIG_JSON);
     let config_str = std::fs::read_to_string(&config_path).expect("Failed to read config.json");
     let config: serde_json::Value = serde_json::from_str(&config_str).expect("Failed to parse config.json");
     assert!(config.get("num_hidden_layers").is_some(), "num_hidden_layers missing in config");
-    println!("[TEST] test_config_json_parsing (took {:.2?})", t0.elapsed());
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_config_json_parsing", duration);
+    TEST_REPORTER.log_message(5, &format!("config.json parsing check passed (took {:.2?})", duration));
 }
 
 #[test]
 #[serial]
 #[ignore]
 fn test_safetensors_loading() {
-    get_model(Some(DEFAULT_MODEL_ID)).expect("Failed to get or download model files");
     let t0 = Instant::now();
+    TEST_REPORTER.log_message(6, "Loading and validating safetensors...");
+    get_model(Some(DEFAULT_MODEL_ID)).expect("Failed to get or download model files");
     let input_dir = original_dir().join(DEFAULT_MODEL_ID);
     let safetensors_path = input_dir.join("model.safetensors");
     let file = std::fs::File::open(&safetensors_path).expect("Failed to open safetensors");
@@ -131,7 +153,9 @@ fn test_safetensors_loading() {
         let tensor = safetensors.tensor(name).expect("Tensor missing");
         assert_eq!(tensor.dtype(), Dtype::BF16, "Tensor {} is not BF16", name);
     }
-    println!("[TEST] test_safetensors_loading (took {:.2?})", t0.elapsed());
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_safetensors_loading", duration);
+    TEST_REPORTER.log_message(6, &format!("Safetensors loading check passed (took {:.2?})", duration));
 }
 
 #[test]
@@ -139,6 +163,7 @@ fn test_safetensors_loading() {
 #[ignore]
 fn test_tensor_conversion_bf16_to_f32() {
     let t0 = Instant::now();
+    TEST_REPORTER.log_message(7, "Testing BF16 to F32 conversion...");
     let bf16_vals = vec![bf16::from_f32(1.0), bf16::from_f32(-2.0)];
     // SAFETY: bf16 is not Pod, so cast to u16 first, then to u8
     let u16_vals: Vec<u16> = bf16_vals.iter().map(|b| b.to_bits()).collect();
@@ -148,7 +173,9 @@ fn test_tensor_conversion_bf16_to_f32() {
     assert_eq!(f32_vec.len(), 2);
     assert!((f32_vec[0] - 1.0).abs() < 0.01);
     assert!((f32_vec[1] + 2.0).abs() < 0.01);
-    println!("[TEST] test_tensor_conversion_bf16_to_f32 (took {:.2?})", t0.elapsed());
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_tensor_conversion_bf16_to_f32", duration);
+    TEST_REPORTER.log_message(7, &format!("BF16 to F32 conversion check passed (took {:.2?})", duration));
 }
 
 #[test]
@@ -156,6 +183,7 @@ fn test_tensor_conversion_bf16_to_f32() {
 #[ignore]
 fn test_layer_quantization_and_packing() {
     let t0 = Instant::now();
+    TEST_REPORTER.log_message(8, "Testing layer quantization and packing...");
     use bitnet_converter::packer::quantize_to_1_58_bit_optimized;
     let n = 4;
     let k = 16;
@@ -165,15 +193,18 @@ fn test_layer_quantization_and_packing() {
     assert_eq!(quantized.len(), n*k);
     assert_eq!(scales.len(), n);
     assert!(quantized.iter().all(|&v| v >= -1 && v <= 1));
-    println!("[TEST] test_layer_quantization_and_packing (took {:.2?})", t0.elapsed());
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_layer_quantization_and_packing", duration);
+    TEST_REPORTER.log_message(8, &format!("Layer quantization and packing check passed (took {:.2?})", duration));
 }
 
 #[test]
 #[serial]
 #[ignore]
 fn test_per_block_serialization() {
-    get_model(Some(DEFAULT_MODEL_ID)).expect("Failed to get or download model files");
     let t0 = Instant::now();
+    TEST_REPORTER.log_message(9, "Testing per-block serialization...");
+    get_model(Some(DEFAULT_MODEL_ID)).expect("Failed to get or download model files");
     let input_dir = original_dir().join(DEFAULT_MODEL_ID);
     let output_dir = converted_dir().join(DEFAULT_MODEL_ID);
     let _ = bitnet_converter::convert_model_on_disk(
@@ -185,15 +216,18 @@ fn test_per_block_serialization() {
         let path = output_dir.join(f);
         assert!(path.exists(), "Expected output file missing: {}", f);
     }
-    println!("[TEST] test_per_block_serialization (took {:.2?})", t0.elapsed());
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_per_block_serialization", duration);
+    TEST_REPORTER.log_message(9, &format!("Per-block serialization check passed (took {:.2?})", duration));
 }
 
 #[test]
 #[serial]
 #[ignore]
 fn test_per_block_deserialization() {
-    get_model(Some(DEFAULT_MODEL_ID)).expect("Failed to get or download model files");
     let t0 = Instant::now();
+    TEST_REPORTER.log_message(10, "Testing per-block deserialization...");
+    get_model(Some(DEFAULT_MODEL_ID)).expect("Failed to get or download model files");
     use bincode::serde::decode_from_slice;
     use bincode::config::standard;
     let output_dir = converted_dir().join(DEFAULT_MODEL_ID);
@@ -208,7 +242,9 @@ fn test_per_block_deserialization() {
         let buf = std::fs::read(&path).expect(&format!("Failed to read {}", f));
         let _ : Result<(serde_json::Value, usize), _> = decode_from_slice(&buf, standard());
     }
-    println!("[TEST] test_per_block_deserialization (took {:.2?})", t0.elapsed());
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_per_block_deserialization", duration);
+    TEST_REPORTER.log_message(10, &format!("Per-block deserialization check passed (took {:.2?})", duration));
 }
 
 #[test]
@@ -216,6 +252,7 @@ fn test_per_block_deserialization() {
 #[ignore]
 fn test_error_on_missing_tensor() {
     let t0 = Instant::now();
+    TEST_REPORTER.log_message(11, "Testing error on shape mismatch...");
     use bitnet_converter::packer::quantize_to_1_58_bit_optimized;
     let n = 4;
     let k = 16;
@@ -227,20 +264,38 @@ fn test_error_on_missing_tensor() {
         quantize_to_1_58_bit_optimized(&tensor, &shape);
     });
     assert!(result.is_err(), "Should panic on shape mismatch");
-    println!("[TEST] test_error_on_missing_tensor (took {:.2?})", t0.elapsed());
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_error_on_missing_tensor", duration);
+    TEST_REPORTER.log_message(11, &format!("Shape mismatch error check passed (took {:.2?})", duration));
+}
+
+fn zzz_final_pipeline_report() {
+    // This function runs last and generates the final report.
+    TEST_REPORTER.generate_report();
 }
 
 #[test]
 #[serial]
 fn test_end_to_end_pipeline() {
     let t0 = Instant::now();
+    TEST_REPORTER.log_message(100, "STARTING END-TO-END PIPELINE VALIDATION");
     test_model_files_present();
     test_required_files_present();
+    test_conversion_outputs_blocks();
+    test_load_some_blocks();
     test_config_json_parsing();
     test_safetensors_loading();
     test_tensor_conversion_bf16_to_f32();
     test_layer_quantization_and_packing();
     test_per_block_serialization();
     test_per_block_deserialization();
-    println!("[TEST] End-to-end pipeline passed (took {:.2?})", t0.elapsed());
-} 
+    test_error_on_missing_tensor();
+
+    // Generate the report at the very end
+    zzz_final_pipeline_report();
+
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_end_to_end_pipeline", duration);
+    TEST_REPORTER.log_message(100, &format!("End-to-end pipeline passed (took {:.2?})", duration));
+}
+

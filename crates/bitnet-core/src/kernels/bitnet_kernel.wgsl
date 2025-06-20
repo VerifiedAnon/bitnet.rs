@@ -38,10 +38,9 @@ var<workgroup> tile_b: array<i32, TILE_B_SIZE>;
 // Remove LUT and use direct decode function for ternary weights
 fn decode_2bit(val: u32) -> i32 {
     switch(val) {
-        case 0u: { return -1; }
-        case 1u: { return 0; }
-        case 2u: { return 1; }
-        default: { return 0; } // 0b11 is unused, map to 0
+        case 1u: { return 1; }   // 01
+        case 2u: { return -1; }  // 10
+        default: { return 0; }   // 00 or 11
     }
 }
 

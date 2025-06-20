@@ -15,7 +15,7 @@ Welcome to bitnet-rs! This document is your single source of truth for understan
 
 Below is the up-to-date structure of the BitNet-rs repository. Each file and directory is annotated for purpose and onboarding clarity.
 
-```
+```text
 bitnet-rs/
 ├── Cargo.toml                 # Workspace definition for all crates
 ├── .cargo/
@@ -26,7 +26,7 @@ bitnet-rs/
 ├── PROJECT_PLAN.md            # Detailed project plan and architecture
 ├── src/
 │   └── main.rs                # Workspace-level entry point/test harness
-├── burn-custom-kernel-test-0-17/
+├── custom-kernel-test/
 │   ├── README.md              # Standalone kernel validation/prototyping
 │   ├── Cargo.toml             # Minimal test workspace
 │   ├── src/                   # Kernel test code
@@ -42,20 +42,14 @@ bitnet-rs/
 │   │   │   ├── feed_forward.rs
 │   │   │   ├── rms_norm.rs
 │   │   │   ├── bitnet_linear.rs
-│   │   │   ├── op.rs
 │   │   │   ├── tokenizer.rs
-│   │   │   ├── hf.rs
 │   │   │   ├── settings.rs
 │   │   │   ├── embedding.rs
 │   │   │   ├── training.rs
 │   │   │   ├── visualization.rs
 │   │   │   ├── kernels.rs
-│   │   │   └── kernels/
+│   │   │   └── wgpu_context.rs
 │   │   │       ├── bitnet_kernel.wgsl
-│   │   │       ├── wgpu.rs
-│   │   │       ├── cpu.rs
-│   │   │       ├── cpu_x86.rs
-│   │   │       ├── cpu_arm.rs
 │   │   │       └── README.md
 │   │   ├── tests/
 │   │   │   ├── pipeline_integration.rs
@@ -101,7 +95,8 @@ bitnet-rs/
 │       │   ├── constants.rs
 │       │   ├── error.rs
 │       │   ├── combine.rs
-│       │   └── hf_loader.rs
+│       │   ├── hf_loader.rs
+│       │   └── test_utils.rs
 │       └── gui_combiner/
 │           ├── Cargo.toml
 │           └── src/
@@ -142,21 +137,23 @@ bitnet-rs/
 | **bitnet-core/src/attention.rs** | Attention block | Implements multi-head attention, RoPE, uses BitLinear | - |
 | **bitnet-core/src/feed_forward.rs** | Feed-Forward block | Implements SwiGLU, uses BitLinear | - |
 | **bitnet-core/src/rms_norm.rs** | RMSNorm | Wrapper for RMSNorm logic for API consistency and to potentially add tracing or other custom logic later. | - |
-| **bitnet-core/src/op.rs** | BitLinear CustomOp | BitLinear struct, CustomOp impl, backend dispatch | Central hub for CPU/GPU, must be correct and fast |
+| **bitnet-core/src/bitnet_linear.rs** | BitLinear CustomOp | BitLinear struct, CustomOp impl, backend dispatch | Central hub for CPU/GPU, must be correct and fast |
 | **bitnet-core/src/tokenizer.rs** | Text tokenizer | Tokenizer struct wrapping tokenizers crate, ChatFormat logic | Must match Python tokenizer, handle chat templates |
 | **bitnet-core/src/kernels/mod.rs** | Kernel aggregator | Declares cpu, wgpu modules | - |
 | **bitnet-core/src/kernels/cpu.rs** | CPU backend | Forward function, runtime SIMD detection, scalar fallback | **Fragile**: SIMD dispatch, must validate against scalar |
 | **bitnet-core/src/kernels/cpu_x86.rs** | AVX2 SIMD kernel | Rust AVX2 intrinsics, lut_ctor, tbl_impl_* | **Very fragile**: Unsafe, must match scalar exactly |
 | **bitnet-core/src/kernels/cpu_arm.rs** | NEON SIMD kernel | Rust NEON intrinsics, lut_ctor, tbl_impl_* | **Very fragile**: Unsafe, must match scalar exactly |
 | **bitnet-core/src/kernels/wgpu.rs** | GPU backend | Manages wgpu, loads shader, dispatches compute | **Very difficult**: Performance tuning, correctness |
-| **bitnet-core/tests/validation.rs** | End-to-end tests | Golden file test, prompt-to-token match | Must match Python output exactly |
-| **bitnet-core/tests/kernel_tests.rs** | Kernel validation | Scalar vs SIMD/GPU output comparison | **Non-negotiable**: Must pass for all kernels. Now exists as a stub with scalar reference and test stubs. |
+| **bitnet-core/tests/pipeline_validation.rs** | End-to-end tests | Placeholder for golden file test, prompt-to-token match | Must match Python output exactly. Currently ignored. |
+| **bitnet-core/tests/pipeline_integration.rs**| Integration test | Tests full model pipeline ensuring all components work together. | Uses the project-wide `TestReporter`. |
+| **bitnet-core/tests/kernel_tests.rs** | Kernel validation | Comprehensive, low-level validation of the wgpu kernel against a scalar CPU implementation. | **Non-negotiable**: Must pass for all kernels. Includes extensive tests for correctness, dimensions, and edge cases. Uses the project-wide `TestReporter` for detailed markdown reports. |
 | **bitnet-converter/src/main.rs** | CLI entry | Uses clap, calls packer | - |
 | **bitnet-converter/src/packer.rs** | Weight conversion | quantize -> permutate -> pack -> interleave | Must match Python scripts exactly |
 | **bitnet-app/src/main.rs** | User app entry | Loads model/tokenizer, runs generation loop | - |
 | **bitnet-app/src/generation.rs** | Generation engine | Generator struct, manages KV cache | - |
 | **bitnet-app/src/sampler.rs** | Logits processor | LogitsProcessor struct, sampling logic | - |
 | **bitnet-app/src/gui/backend.rs** | GUI backend | Threaded model execution, mpsc channels | - |
+| **bitnet-tools/src/test_utils.rs** | Test Reporting Utility | Provides a robust, thread-safe test reporting utility (`TestReporter`) that generates detailed markdown logs, handling parallel tests gracefully. | - |
 
 ---
 
@@ -176,13 +173,13 @@ bitnet-rs/
 ## Critique & Resolution
 
 - **CPU SIMD code is complex and fragile.**
-  - *Resolution:* Rigorous, mandatory validation. Every SIMD function is tested against a scalar version. No PR is merged unless all tests pass.
+  - *Resolution:* Rigorous, mandatory validation. Every SIMD function is tested against a scalar version. No PR is merged unless all tests pass. A comprehensive test suite (`kernel_tests.rs`) and a robust reporting utility (`TestReporter`) have been developed to enforce this.
 - **GPU implementation may not be fast initially.**
   - *Resolution:* Plan for iterative tuning. Use wgpu profiling, experiment with workgroup sizes, memory layout, and compare different kernel strategies.
 - **Dependency on GGML logic is a risk.**
   - *Resolution:* Treat GGML as a spec, not gospel. Validate against our own scalar implementation first, then against official outputs.
 - **Numeric precision differences could cause divergence.**
-  - *Resolution:* End-to-end golden testing. CI must run golden prompt tests for both CPU and GPU, asserting output token IDs match the reference.
+  - *Resolution:* End-to-end golden testing. CI must run golden prompt tests for both CPU and GPU, asserting output token IDs match the reference. The `pipeline_validation.rs` test is the placeholder for this.
 
 ---
 
@@ -224,9 +221,9 @@ bitnet-rs/
 
 ## Deep Dive: Critical Components & Data Flow
 
-### Deep Dive 1: op.rs — The BitLinear CustomOp & Kernel Signatures
+### Deep Dive 1: bitnet_linear.rs — The BitLinear CustomOp & Kernel Signatures
 
-**File:** `crates/bitnet-core/src/op.rs`
+**File:** `crates/bitnet-core/src/bitnet_linear.rs`
 
 This is the most important interface in the project. Its implementation must be precise.
 
@@ -235,7 +232,7 @@ This is the most important interface in the project. Its implementation must be 
 **Struct Definition:**
 
 ```rust
-// In crates/bitnet-core/src/op.rs
+// In crates/bitnet-core/src/bitnet_linear.rs
 pub struct BitLinear {
     // Stored in the specific format our kernels expect after conversion.
     // Shape: [out_features, in_features / 4]
@@ -288,7 +285,8 @@ impl CustomOp for BitLinear {
 
 ### Deep Dive 2: kernels/cpu_*.rs — The CPU LUT Kernel Logic
 
-**Files:** 
+**Files:**
+
 - `crates/bitnet-core/src/kernels/cpu_x86.rs`
 - `crates/bitnet-core/src/kernels/cpu_arm.rs`
 
@@ -748,14 +746,14 @@ fn quantize_to_ternary(
     - Uses `std::sync::mpsc::channel` for message passing. The UI thread holds the Sender, and the model thread holds the Receiver.
     - When the user sends a message, the UI thread sends a `BackendCommand::Generate { prompt: String }` message to the model thread.
     - The model thread loops, receiving commands. On `Generate`, it enters a generation loop. For each token produced, it sends a `UICommand::AppendToken { token: String }` message back to the UI thread.
-    - The UI thread's update loop uses `try_recv()` to check for new tokens without blocking, appending them to the chat display as they arrive. This creates the "streaming" effect and keeps the UI responsive. 
+    - The UI thread's update loop uses `try_recv()` to check for new tokens without blocking, appending them to the chat display as they arrive. This creates the "streaming" effect and keeps the UI responsive.
 
 ## Guiding Principles & Philosophy
 
 This project aims to create a high-performance, dual-backend inference engine for BitNet-style models, written entirely in pure Rust. Our philosophy is guided by three core principles:
 
 - **Performance through Specialization:**
-We recognize that peak performance on different hardware (GPU vs. CPU) requires fundamentally different algorithmic approaches. We will implement two highly specialized backends: a "Decode-and-Multiply" kernel for GPUs (informed by the Microsoft CUDA implementation) and a "Look-Up Table" (LUT) kernel for CPUs (informed by the GGML implementation), leveraging the unique strengths of each architecture.
+We recognize that peak performance on different hardware (GPU vs. CPU) requires fundamentally different algorithmic approaches. We will implement two highly specialized backends: a "Decode-and-Multiply" kernel for GPUs (informed by the Microsoft CUDA implementation) and a "Look-Up Table" (LUT) kernel for CPUs (informed by the GGML CPU kernels), leveraging the unique strengths of each architecture.
 
 - **Ergonomics and Accessibility:**
 
@@ -774,7 +772,7 @@ This section outlines key Rust-specific concepts to ensure the project is perfor
     - **Instruction:**
     Pass by reference (& or &mut) wherever possible. A clone() should be a deliberate design choice, not a default.
   - Heap Allocations in Loops: Avoid creating objects that allocate on the heap (e.g., Vec, String) inside performance-critical loops.
-    - **Instruction:** 
+    - **Instruction:**
     Pre-allocate buffers, strings, or vectors outside the loop and reuse them. The generation.rs loop should pre-allocate its token history vector with a reasonable capacity.
 
 - **Error Handling: Production Code Must Not Panic**

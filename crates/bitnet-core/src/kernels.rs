@@ -43,6 +43,7 @@
 //! - Workgroup-level parallelism on GPU
 
 use bytemuck::{Pod, Zeroable};
+use std::time::Instant;
 
 /// Metadata for BitNet kernel execution.
 ///
@@ -76,77 +77,85 @@ use bytemuck::{Pod, Zeroable};
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct BitnetMetadata {
-    /// Batch size (number of rows in the activation matrix)
+    /// Batch size (M)
     pub m: u32,
-    /// Output features (number of rows in the weight matrix)
+    /// Output features (N)
     pub n: u32,
-    /// Input features (number of columns in the weight matrix)
+    /// Input features (K)
     pub k: u32,
-    /// K / 16 (since 16 2-bit weights are packed into one u32)
+    /// Input features / 16 (packed)
     pub k_packed: u32,
 }
 
-/// Packs ternary weights into a compact bit representation.
+/// Pack ternary weights into u32 values (16 weights per u32) and calculate scales.
 ///
-/// This function converts an array of ternary weights (-1, 0, +1) into
-/// a packed format where each weight uses 2 bits:
-/// - -1 => 00 (binary 0)
-/// - 0  => 01 (binary 1)
-/// - +1 => 10 (binary 2)
+/// This function converts a 2D array of ternary weights (-1, 0, +1) into:
+/// 1. A packed format where each weight uses 2 bits:
+///    - -1 => 00 (binary 0)
+///    - 0  => 01 (binary 1)
+///    - +1 => 10 (binary 2)
+/// 2. Per-output-channel scaling factors
 ///
 /// # Arguments
 ///
-/// * `weights` - Array of ternary weights (-1, 0, or +1)
+/// * `weights` - 2D array of ternary weights [out_features][in_features]
 ///
 /// # Returns
 ///
-/// * Vector of u32s, each containing 16 packed weights
+/// * `(Vec<u32>, Vec<f32>)` - (packed_weights, weight_scales)
 ///
 /// # Examples
 ///
 /// ```rust
 /// use bitnet_core::kernels::pack_ternary_weights;
 ///
-/// let weights = vec![-1i8, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1, 0];
-/// let packed = pack_ternary_weights(&weights);
+/// let weights = vec![
+///     vec![-1i8, 0, 1],  // First output channel
+///     vec![0, 1, -1],     // Second output channel
+/// ];
+/// let (packed, scales) = pack_ternary_weights(&weights);
 /// ```
-///
-/// # Panics
-///
-/// * If the number of weights is not divisible by 16
-/// * If any weight is not -1, 0, or +1
-///
-/// # Implementation Notes
-///
-/// The packing process:
-/// 1. Groups weights into chunks of 16
-/// 2. Encodes each weight using 2 bits
-/// 3. Combines encoded weights into u32s
-pub fn pack_ternary_weights(weights: &[i8]) -> Vec<u32> {
-    assert_eq!(
-        weights.len() % 16,
-        0,
-        "Weight count must be divisible by 16 for packing."
-    );
-    let mut packed = Vec::with_capacity(weights.len() / 16);
-    for chunk in weights.chunks(16) {
-        let mut packed_val = 0u32;
-        for (i, &weight) in chunk.iter().enumerate() {
-            let encoded = match weight {
-                -1 => 0b00, // Binary 0
-                0 => 0b01,  // Binary 1
-                1 => 0b10,  // Binary 2
-                _ => panic!("Invalid ternary weight provided: {}", weight),
-            };
-            // Shift the 2-bit encoded value to its position in the u32
-            packed_val |= encoded << (i * 2);
+pub fn pack_ternary_weights(weights: &[Vec<i8>]) -> (Vec<u32>, Vec<f32>) {
+    let out_features = weights.len();
+    let in_features = weights[0].len();
+    let packed_size = (in_features + 15) / 16;
+    
+    let mut packed_weights = vec![0u32; out_features * packed_size];
+    let mut weight_scales = vec![0.0f32; out_features];
+    
+    for (out_idx, row) in weights.iter().enumerate() {
+        // Calculate scale for this output channel
+        let mut sum_abs = 0.0f32;
+        let mut count = 0;
+        for &w in row.iter() {
+            if w != 0 {
+                sum_abs += w.abs() as f32;
+                count += 1;
+            }
         }
-        packed.push(packed_val);
+        weight_scales[out_idx] = if count > 0 { sum_abs / count as f32 } else { 1.0 };
+        
+        // Pack weights
+        for (in_idx, &w) in row.iter().enumerate() {
+            let pack_idx = in_idx / 16;
+            let bit_idx = 30 - ((in_idx % 16) * 2); // Start from MSB and work down
+            
+            // Map -1, 0, +1 to 2-bit values
+            let bits = match w {
+                -1 => 0u32, // 00
+                0 => 1u32,  // 01
+                1 => 2u32,  // 10
+                _ => panic!("Invalid ternary weight value: {}", w),
+            };
+            
+            packed_weights[out_idx * packed_size + pack_idx] |= bits << bit_idx;
+        }
     }
-    packed
+    
+    (packed_weights, weight_scales)
 }
 
-/// Calculates per-channel weight scaling factors.
+/// Calculate per-output-channel weight scaling factors.
 ///
 /// This function computes the β scaling factor from the BitNet paper
 /// for each output channel. The scale is the average magnitude of
@@ -171,69 +180,85 @@ pub fn pack_ternary_weights(weights: &[i8]) -> Vec<u32> {
 /// ];
 /// let scales = calculate_weight_scales(&channels);
 /// ```
-///
-/// # Implementation Notes
-///
-/// For each channel:
-/// 1. Sum the absolute values of all weights
-/// 2. Count the number of non-zero weights
-/// 3. Compute scale as sum/count (or 1.0 if all zeros)
 pub fn calculate_weight_scales(weights: &[Vec<i8>]) -> Vec<f32> {
-    weights
-        .iter()
-        .map(|channel| {
-            let sum_abs: f32 = channel.iter().map(|&w| w.abs() as f32).sum();
-            let non_zero_count = channel.iter().filter(|&&w| w != 0).count() as f32;
-            if non_zero_count > 0.0 {
-                sum_abs / non_zero_count
-            } else {
-                // If a channel is all zeros, its scale is 1.0 to avoid division by zero.
-                1.0
+    weights.iter().map(|row| {
+        let mut sum_abs = 0.0f32;
+        let mut count = 0;
+        for &w in row {
+            if w != 0 {
+                sum_abs += w.abs() as f32;
+                count += 1;
             }
-        })
-        .collect()
+        }
+        if count > 0 { sum_abs / count as f32 } else { 1.0 }
+    }).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn test_weight_packing() {
-        let weights = vec![-1i8, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1, 0];
-        let packed = pack_ternary_weights(&weights);
-        assert_eq!(packed.len(), 1); // 16 weights -> 1 u32
-
-        // Verify each 2-bit segment
-        let expected = 0b10_00_10_01_10_00_01_01_10_00_10_01_10_01_00_01u32;
-        assert_eq!(packed[0], expected);
+        let t0 = Instant::now();
+        let weights = vec![
+            vec![-1i8, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1, 0],
+            vec![1i8, -1, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1],
+        ];
+        let (packed, scales) = pack_ternary_weights(&weights);
+        
+        // Check packed size
+        assert_eq!(packed.len(), 2); // 2 output channels, 16 inputs each = 2 u32s
+        
+        // Check scales
+        assert_eq!(scales.len(), 2);
+        assert!(scales.iter().all(|&s| s > 0.0));
+        
+        // Verify first row packing
+        // Input:  -1,  0,  1,  0, -1,  1,  0,  0,  1, -1,  0,  1,  0, -1,  1,  0
+        // Bits:   00, 01, 10, 01, 00, 10, 01, 01, 10, 00, 01, 10, 01, 00, 10, 01
+        let expected = 0b00_01_10_01_00_10_01_01_10_00_01_10_01_00_10_01u32;
+        assert_eq!(packed[0], expected, "Packed weights don't match expected pattern.\nExpected: {:032b}\nGot:      {:032b}", expected, packed[0]);
+        
+        // Verify second row packing
+        // Input:   1, -1,  0,  1,  0, -1,  1,  0,  0,  1, -1,  0,  1,  0, -1,  1
+        // Bits:   10, 00, 01, 10, 01, 00, 10, 01, 01, 10, 00, 01, 10, 01, 00, 10
+        let expected_second = 0b10_00_01_10_01_00_10_01_01_10_00_01_10_01_00_10u32;
+        assert_eq!(packed[1], expected_second, "Second row packed weights don't match expected pattern.\nExpected: {:032b}\nGot:      {:032b}", expected_second, packed[1]);
+        println!("[TEST] test_weight_packing (took {:.2?})", t0.elapsed());
     }
 
     #[test]
     fn test_weight_scales() {
-        let channels = vec![
-            vec![-1i8, 0, 1],  // Average magnitude = 1.0
-            vec![0, 0, 0],     // All zeros -> scale = 1.0
-            vec![1, 1, -1],    // Average magnitude = 1.0
+        let t0 = Instant::now();
+        let weights = vec![
+            vec![-1i8, 0, 1],     // Average magnitude = 1.0 (sum=2, count=2)
+            vec![0, 0, 0],        // All zeros -> scale = 1.0
+            vec![1, 1, -1],       // Average magnitude = 1.0 (sum=3, count=3)
+            vec![-1, -1, 0],      // Average magnitude = 1.0 (sum=2, count=2)
         ];
-        let scales = calculate_weight_scales(&channels);
-        assert_eq!(scales.len(), 3);
-        assert!((scales[0] - 1.0).abs() < 1e-6);
-        assert!((scales[1] - 1.0).abs() < 1e-6);
-        assert!((scales[2] - 1.0).abs() < 1e-6);
+        let scales = calculate_weight_scales(&weights);
+        
+        assert_eq!(scales.len(), 4);
+        // First row: (-1, 0, 1) -> sum=2, count=2 -> scale=1.0
+        assert!((scales[0] - 1.0).abs() < 1e-6, "First row scale should be 1.0");
+        // Second row: (0, 0, 0) -> sum=0, count=0 -> scale=1.0
+        assert!((scales[1] - 1.0).abs() < 1e-6, "All-zero row should have scale 1.0");
+        // Third row: (1, 1, -1) -> sum=3, count=3 -> scale=1.0
+        assert!((scales[2] - 1.0).abs() < 1e-6, "Third row scale should be 1.0");
+        // Fourth row: (-1, -1, 0) -> sum=2, count=2 -> scale=1.0
+        assert!((scales[3] - 1.0).abs() < 1e-6, "Fourth row scale should be 1.0");
+        
+        println!("[TEST] test_weight_scales (took {:.2?})", t0.elapsed());
     }
 
     #[test]
-    #[should_panic(expected = "Weight count must be divisible by 16")]
-    fn test_invalid_weight_count() {
-        let weights = vec![-1i8, 0, 1]; // Not divisible by 16
-        pack_ternary_weights(&weights);
-    }
-
-    #[test]
-    #[should_panic(expected = "Invalid ternary weight")]
+    #[should_panic(expected = "Invalid ternary weight value")]
     fn test_invalid_weight_value() {
-        let weights = vec![2i8; 16]; // Invalid weight value
-        pack_ternary_weights(&weights);
+        let t0 = Instant::now();
+        let weights = vec![vec![2i8; 16]]; // Invalid weight value
+        pack_ternary_weights(&weights); // This should panic
+        println!("[TEST] test_invalid_weight_value (took {:.2?})", t0.elapsed());
     }
 }

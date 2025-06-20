@@ -4,12 +4,10 @@
 
 ---
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Rust-2021-orange" alt="Rust 2021" />
-  <img src="https://img.shields.io/badge/License-Apache%202.0-blue" alt="License" />
-  <img src="https://img.shields.io/badge/CI-passing-brightgreen" alt="CI Status" />
-  <img src="https://img.shields.io/badge/Platform-CPU%20%7C%20GPU%20(WGSL)-purple" alt="Platform" />
-</p>
+![Rust 2021](https://img.shields.io/badge/Rust-2021-orange)
+![License](https://img.shields.io/badge/License-Apache%202.0-blue)
+![CI Status](https://img.shields.io/badge/CI-passing-brightgreen)
+![Platform](https://img.shields.io/badge/Platform-CPU%20%7C%20GPU%20(WGSL)-purple)
 
 ---
 
@@ -77,21 +75,30 @@ cargo run -p bitnet-app -- --help
 ## Build Instructions
 
 1. **Install Rust (nightly recommended):**
-   https://rustup.rs/
+   <https://rustup.rs/>
+
 2. **Clone the repository:**
+
    ```sh
    git clone https://github.com/ocentra/bitnet-ocentra.git
    cd bitnet-ocentra
+
    ```
+
 3. **Build all crates:**
+
    ```sh
    cargo build --workspace
    ```
+
 4. **Run tests:**
+
    ```sh
    cargo test --workspace --all-features
    ```
+
 5. **Run the converter or app:**
+
    ```sh
    cargo run -p bitnet-converter -- --help
    cargo run -p bitnet-app -- --help
@@ -148,6 +155,7 @@ This project was developed using a modern AI-assisted development approach we ca
 ### Our Real-World Development Process
 
 #### 1. Project Planning & Structure
+
 ```bash
 # Initial project structure
 PROJECT_PLAN.md        # Detailed architecture & implementation plan
@@ -163,6 +171,7 @@ crates/               # Modular crate structure
 Here's exactly how we built BitNet-rs using AI tools:
 
 1. **Initial Planning with AI**
+
    ```bash
    # 1. Created PROJECT_PLAN.md with high-level architecture
    # 2. Used Cursor + Claude to refine the plan:
@@ -172,6 +181,7 @@ Here's exactly how we built BitNet-rs using AI tools:
    ```
 
 2. **Code Organization & Review**
+
    ```bash
    # Used our file combiner tool to prepare code for AI review:
    cargo combine-files bitnet-core   # Combines core crate files
@@ -183,6 +193,7 @@ Here's exactly how we built BitNet-rs using AI tools:
    ```
 
 3. **Iterative Development with AI**
+
    ```bash
    # 1. Write code with Cursor + Claude
    # 2. Regular check-ins with AI:
@@ -201,6 +212,7 @@ Here's exactly how we built BitNet-rs using AI tools:
    - This structure helps AI understand context
 
 2. **Code Review Workflow**
+
    ```bash
    # 1. Combine related files:
    cargo combine-files crate-name
@@ -218,6 +230,7 @@ Here's exactly how we built BitNet-rs using AI tools:
    - Cross-validate between models
 
 4. **Documentation Strategy**
+
    ```markdown
    # Each crate has:
    - README.md           # Usage & examples
@@ -228,6 +241,7 @@ Here's exactly how we built BitNet-rs using AI tools:
 ### Our Tools & Setup
 
 1. **File Combiner**
+
    ```toml
    # .cargo/config.toml
    [alias]
@@ -235,6 +249,7 @@ Here's exactly how we built BitNet-rs using AI tools:
    ```
 
 2. **Development Environment**
+
    ```bash
    # Primary: Cursor IDE
    # - AI-assisted coding
@@ -243,6 +258,7 @@ Here's exactly how we built BitNet-rs using AI tools:
    ```
 
 3. **AI Integration**
+
    ```bash
    # 1. Cursor for main development
    # 2. Browser tabs for:
@@ -253,6 +269,7 @@ Here's exactly how we built BitNet-rs using AI tools:
 ### Real Examples from This Project
 
 1. **Planning Phase**
+
    ```markdown
    # PROJECT_PLAN.md excerpt:
    ## Deep Dive: Critical Components
@@ -262,6 +279,7 @@ Here's exactly how we built BitNet-rs using AI tools:
    ```
 
 2. **Implementation Phase**
+
    ```rust
    // Example of AI-assisted implementation:
    // 1. Wrote high-level structure
@@ -270,6 +288,7 @@ Here's exactly how we built BitNet-rs using AI tools:
    ```
 
 3. **Review & Optimization**
+
    ```bash
    # 1. Combined files for review
    # 2. AI analyzed performance
@@ -279,6 +298,7 @@ Here's exactly how we built BitNet-rs using AI tools:
 ### Getting Started with Vibe Coding
 
 1. **Setup Your Project**
+
    ```bash
    # 1. Create planning documents
    touch PROJECT_PLAN.md CHECKLIST.md
@@ -288,6 +308,7 @@ Here's exactly how we built BitNet-rs using AI tools:
    ```
 
 2. **Development Workflow**
+
    ```bash
    # 1. Plan with AI
    # 2. Implement with Cursor
@@ -308,6 +329,7 @@ Here's exactly how we built BitNet-rs using AI tools:
 We discovered that asking AI to write code directly often produces suboptimal results. Instead, we developed this effective pattern:
 
 1. **Test-First Approach**
+
    ```rust
    // 1. Ask AI to write tests first
    #[test]
@@ -326,6 +348,7 @@ We discovered that asking AI to write code directly often produces suboptimal re
    ```
 
 2. **Development Flow**
+
    ```bash
    # 1. Write test with AI
    cargo test --test kernel_tests -- --nocapture
@@ -341,6 +364,7 @@ We discovered that asking AI to write code directly often produces suboptimal re
 #### Using Multiple AI Models Effectively
 
 1. **Project-Wide Context with Gemini**
+
    ```bash
    # 1. Combine all project files
    cargo combine-files --all-crates
@@ -352,6 +376,7 @@ We discovered that asking AI to write code directly often produces suboptimal re
    ```
 
 2. **Specialized Problem Solving**
+
    ```bash
    # Example: Working on bitnet-converter
    
@@ -371,6 +396,7 @@ We discovered that asking AI to write code directly often produces suboptimal re
 Here's our proven pattern for complex implementations:
 
 1. **Goal-Based Testing**
+
    ```rust
    // Tell Cursor: "Goal: Test WGSL kernel correctness
    // Don't stop until tests pass"
@@ -384,6 +410,7 @@ Here's our proven pattern for complex implementations:
    ```
 
 2. **YOLO Auto Mode**
+
    ```bash
    # Tell Cursor:
    "Enter YOLO auto mode:
@@ -395,6 +422,7 @@ Here's our proven pattern for complex implementations:
    ```
 
 3. **Real Example: Shader Testing**
+
    ```rust
    // Complex WGSL kernel testing
    #[test]
@@ -416,6 +444,7 @@ Here's our proven pattern for complex implementations:
 #### Tips for Complex Implementations
 
 1. **Shader/Kernel Development**
+
    ```bash
    # 1. Write scalar version first
    # 2. Ask AI to write exhaustive tests
@@ -424,6 +453,7 @@ Here's our proven pattern for complex implementations:
    ```
 
 2. **Using AI for Research**
+
    ```bash
    # 1. Combine relevant code
    cargo combine-files crates/bitnet-core/src/kernels
@@ -435,6 +465,7 @@ Here's our proven pattern for complex implementations:
    ```
 
 3. **Iterative Refinement**
+
    ```rust
    // 1. Start with basic test
    #[test]
@@ -464,6 +495,7 @@ This approach helped us tackle even the most complex parts of the project, like 
 We discovered a game-changing workflow using Gemini 2.5 Pro's massive 1M token context window in Google AI Studio:
 
 1. **Full Project Context**
+
    ```bash
    # Combine EVERYTHING into one file:
    cargo combine-files --all-crates --include-docs
@@ -477,6 +509,7 @@ We discovered a game-changing workflow using Gemini 2.5 Pro's massive 1M token c
    ```
 
 2. **Real Example: Project-Wide Analysis**
+
    ```bash
    # 1. Feed the combined file to Gemini 2.5 Pro
    # Example prompt:
@@ -494,6 +527,7 @@ We discovered a game-changing workflow using Gemini 2.5 Pro's massive 1M token c
    ```
 
 3. **Complex Problem Solving**
+
    ```bash
    # Real workflow we used for SIMD kernels:
    
@@ -522,6 +556,7 @@ We discovered a game-changing workflow using Gemini 2.5 Pro's massive 1M token c
 We developed a powerful workflow combining multiple AI models' strengths:
 
 1. **Gemini → Claude → Cursor Pipeline**
+
    ```bash
    # Step 1: Get Initial Design (Gemini 2.5 Pro)
    # Feed full project context
@@ -543,6 +578,7 @@ We developed a powerful workflow combining multiple AI models' strengths:
    ```
 
 2. **Real Example: Shader Development**
+
    ```rust
    // 1. Gemini: Architecture & Initial Code
    // Given full project context, designed:
@@ -566,6 +602,7 @@ We developed a powerful workflow combining multiple AI models' strengths:
    ```
 
 3. **Workflow Benefits**
+
    ```markdown
    # 1. Gemini 2.5 Pro
    - Sees entire project context
@@ -588,6 +625,7 @@ We developed a powerful workflow combining multiple AI models' strengths:
 Here's how we actually developed the BitNet quantization pipeline:
 
 1. **Initial Architecture (Gemini)**
+
    ```bash
    # 1. Combined all files:
    cargo combine-files \
@@ -604,6 +642,7 @@ Here's how we actually developed the BitNet quantization pipeline:
    ```
 
 2. **Code Review & Refinement (Claude)**
+
    ```rust
    // Received from Claude:
    // - Improved error handling
@@ -618,6 +657,7 @@ Here's how we actually developed the BitNet quantization pipeline:
    ```
 
 3. **Final Implementation (Cursor)**
+
    ```rust
    // Cursor helped:
    // 1. Integrate with existing code
@@ -627,12 +667,14 @@ Here's how we actually developed the BitNet quantization pipeline:
    ```
 
 This multi-AI workflow was crucial for handling complex features like:
+
 - WGSL shader implementation
 - SIMD kernel optimization
 - Quantization pipeline
 - Test suite development
 
 The key was leveraging each AI's strengths:
+
 - Gemini's massive context window for architecture
 - Claude's code review and safety focus
 - Cursor's immediate feedback and testing

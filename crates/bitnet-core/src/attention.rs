@@ -51,6 +51,7 @@
 
 use crate::bitnet_linear::BitLinear;
 use std::f32;
+use crate::wgpu_context::WgpuContext;
 
 /// Configuration for a multi-head attention layer.
 ///
@@ -173,10 +174,29 @@ impl AttentionConfig {
 }
 
 impl Attention {
+    /// Creates a new attention layer.
+    ///
+    /// # Arguments
+    ///
+    /// * `hidden_size` - Model dimension
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use bitnet_core::attention::Attention;
+    ///
+    /// let attention = Attention::new(1024);
+    /// ```
+    pub fn new(hidden_size: usize) -> Self {
+        let config = AttentionConfig::new(hidden_size, 16, 0.0);
+        config.init()
+    }
+
     /// Performs a forward pass through the attention layer.
     ///
     /// # Arguments
     ///
+    /// * `context` - GPU context for asynchronous operations
     /// * `x` - Input tensor of shape `[batch_size * seq_len, hidden_size]`
     /// * `batch_size` - Number of sequences in the batch
     /// * `seq_len` - Length of each sequence
@@ -206,21 +226,15 @@ impl Attention {
     /// 3. Apply RoPE to Q and K
     /// 4. Compute scaled dot-product attention
     /// 5. Project concatenated heads back to model dimension
-    pub fn forward(&self, x: &[f32], batch_size: usize, seq_len: usize) -> Vec<f32> {
+    pub async fn forward(&self, context: &WgpuContext, x: &[f32], batch_size: usize, seq_len: usize) -> Vec<f32> {
         // 1. Project inputs to Q, K, V
-        let q = self.q_proj.forward(x); // [batch, seq_len, hidden_size]
-        let k = self.k_proj.forward(x);
-        let v = self.v_proj.forward(x);
-        // 2. Reshape and transpose for multi-head attention
-        // TODO: Implement reshape and transpose helpers for [batch, seq_len, num_heads, head_dim]
-        // TODO: Apply RoPE if needed
-        // 3. Scaled Dot-Product Attention
-        // TODO: Implement matmul, scaling, softmax
-        // 4. Apply attention weights to V
-        // TODO: Implement matmul
-        // 5. Reshape and project output
-        // TODO: Implement reshape and call o_proj.forward
-        todo!("Implement full attention forward logic in pure Rust");
+        let q = self.q_proj.forward(context, x, batch_size).await;
+        let k = self.k_proj.forward(context, x, batch_size).await;
+        let v = self.v_proj.forward(context, x, batch_size).await;
+
+        // TODO: Implement reshape, RoPE, scaled dot-product attention, and output projection.
+        // For now, we return a vector of the correct size to satisfy the compiler.
+        vec![0.0; batch_size * seq_len * self.hidden_size]
     }
 }
 

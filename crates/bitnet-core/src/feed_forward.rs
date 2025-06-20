@@ -45,6 +45,7 @@
 //! - GPU-accelerated matrix operations
 
 use crate::bitnet_linear::BitLinear;
+use crate::wgpu_context::WgpuContext;
 
 /// Configuration for a feed-forward network.
 ///
@@ -61,6 +62,7 @@ use crate::bitnet_linear::BitLinear;
 ///     intermediate_size: 4096,  // Expansion size (typically 4x hidden)
 /// );
 /// ```
+#[derive(Debug, Clone)]
 pub struct FeedForwardConfig {
     /// Model dimension (input and output size)
     pub hidden_size: usize,
@@ -68,28 +70,7 @@ pub struct FeedForwardConfig {
     pub intermediate_size: usize,
 }
 
-/// Feed-forward network implementation.
-///
-/// This struct implements the feed-forward network used in transformer blocks,
-/// consisting of two quantized linear layers with a GELU activation between them.
-///
-/// # Fields
-///
-/// * `w1` - First linear layer (hidden → intermediate)
-/// * `w2` - Second linear layer (intermediate → hidden)
-///
-/// # Architecture
-///
-/// ```text
-/// x → Linear(w1) → GELU → Linear(w2) → output
-/// ```
-///
-/// # Implementation Notes
-///
-/// The feed-forward network uses:
-/// - Quantized weights in both linear layers
-/// - Efficient GELU approximation
-/// - Memory-friendly data layout
+/// A feed-forward network layer.
 #[derive(Clone)]
 pub struct FeedForward {
     /// First linear layer (hidden → intermediate)
@@ -133,22 +114,43 @@ impl FeedForwardConfig {
     /// Currently initializes with zero weights. In practice, weights
     /// will be loaded from a pretrained model.
     pub fn init(&self) -> FeedForward {
-        // TODO: Replace with real ternary weights from model loading
-        let dummy_w1 = vec![vec![0i8; self.hidden_size]; self.intermediate_size];
-        let dummy_w2 = vec![vec![0i8; self.intermediate_size]; self.hidden_size];
+        let w1_weights = vec![vec![0i8; self.intermediate_size]; self.hidden_size];
+        let w2_weights = vec![vec![0i8; self.hidden_size]; self.intermediate_size];
+
         FeedForward {
-            w1: BitLinear::new(dummy_w1, self.hidden_size, self.intermediate_size),
-            w2: BitLinear::new(dummy_w2, self.intermediate_size, self.hidden_size),
+            w1: BitLinear::new(w1_weights, self.hidden_size, self.intermediate_size),
+            w2: BitLinear::new(w2_weights, self.intermediate_size, self.hidden_size),
         }
     }
 }
 
 impl FeedForward {
+    /// Creates a new feed-forward network from this configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Feed-forward network configuration
+    ///
+    /// # Returns
+    ///
+    /// * New feed-forward network
+    pub fn new(config: FeedForwardConfig) -> Self {
+        let w1_weights = vec![vec![0i8; config.intermediate_size]; config.hidden_size];
+        let w2_weights = vec![vec![0i8; config.hidden_size]; config.intermediate_size];
+
+        Self {
+            w1: BitLinear::new(w1_weights, config.hidden_size, config.intermediate_size),
+            w2: BitLinear::new(w2_weights, config.intermediate_size, config.hidden_size),
+        }
+    }
+
     /// Performs a forward pass through the feed-forward network.
     ///
     /// # Arguments
     ///
+    /// * `context` - GPU context for matrix operations
     /// * `x` - Input tensor of shape `[batch_size * seq_len, hidden_size]`
+    /// * `batch_size` - Number of sequences in the batch
     ///
     /// # Returns
     ///
@@ -173,10 +175,10 @@ impl FeedForward {
     /// 1. Project to intermediate size (w1)
     /// 2. Apply GELU activation
     /// 3. Project back to hidden size (w2)
-    pub fn forward(&self, x: &[f32]) -> Vec<f32> {
-        let x = self.w1.forward(x);
-        let x = gelu(&x);
-        self.w2.forward(&x)
+    pub async fn forward(&self, context: &WgpuContext, x: &[f32], batch_size: usize) -> Vec<f32> {
+        let x1 = self.w1.forward(context, x, batch_size).await;
+        let x2 = gelu(&x1);
+        self.w2.forward(context, &x2, batch_size).await
     }
 }
 
@@ -210,7 +212,13 @@ impl FeedForward {
 /// The error in this approximation is small enough for
 /// practical use in transformer models.
 fn gelu(x: &[f32]) -> Vec<f32> {
-    x.iter().map(|&v| 0.5 * v * (1.0 + (v / std::f32::consts::SQRT_2).tanh())).collect()
+    x.iter()
+        .map(|&x| {
+            let sqrt_2_over_pi = 0.7978845608028654;
+            let coef = sqrt_2_over_pi * (x + 0.044715 * x.powi(3));
+            0.5 * x * (1.0 + f32::tanh(coef))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -224,22 +232,36 @@ mod tests {
         assert_eq!(config.intermediate_size, 4096);
     }
 
-    #[test]
-    fn test_ffn_dimensions() {
+    #[tokio::test]
+    async fn test_ffn_dimensions() {
+        let context = WgpuContext::new().await.unwrap();
         let config = FeedForwardConfig::new(1024, 4096);
         let ffn = config.init();
         let input = vec![0.0; 1024];
-        let output = ffn.forward(&input);
+        let output = ffn.forward(&context, &input, 1).await;
         assert_eq!(output.len(), 1024);
     }
 
     #[test]
     fn test_gelu() {
-        let x = vec![0.0, 1.0, -1.0];
-        let activated = gelu(&x);
+        let input = vec![-1.0, 0.0, 1.0];
+        let activated = gelu(&input);
         assert_eq!(activated.len(), 3);
-        assert!((activated[0] - 0.0).abs() < 1e-6); // GELU(0) = 0
-        assert!(activated[1] > 0.0); // GELU(1) > 0
-        assert!(activated[2] < 0.0); // GELU(-1) < 0
+        assert!(activated[0] < 0.0); // GELU(-1) < 0
+        assert_eq!(activated[1], 0.0); // GELU(0) = 0
+        assert!(activated[2] > 0.0); // GELU(1) > 0
+    }
+
+    #[tokio::test]
+    async fn test_feed_forward() {
+        let ffn = FeedForward::new(FeedForwardConfig {
+            hidden_size: 1024,
+            intermediate_size: 4096,
+        });
+
+        let context = WgpuContext::new().await.unwrap();
+        let input = vec![1.0; 1024];
+        let output = ffn.forward(&context, &input, 1).await;
+        assert_eq!(output.len(), 1024);
     }
 }

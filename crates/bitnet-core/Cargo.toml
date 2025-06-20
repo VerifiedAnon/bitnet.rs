@@ -30,20 +30,31 @@ serde_json = { workspace = true }
 hf-hub = { workspace = true }
 safetensors = { workspace = true }
 tokenizers = { workspace = true }
-thiserror = { workspace = true }
+thiserror = "1.0.57"
 log = { workspace = true }
 tracing = { workspace = true }
 bytemuck = { workspace = true }
 pollster = { workspace = true }
 derive-new = "0.7.0"
 bitnet-tools = { path = "../bitnet-tools" }
-wgpu = "25.0.2"
+wgpu = { version = "25.0.2", optional = true }
 rand = "0.9.1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.36.0", features = ["full"] }
 futures-intrusive = "0.5"
 bitnet-converter = { path = "../bitnet-converter" }
+half = "2"
+memmap2 = "0.9"
+chrono = "0.4"
+lazy_static = "1.4.0"
 
 [dev-dependencies]
 serial_test = "3.2.0"
-half = "2"
-memmap2 = "0.9"
+
+[features]
+default = ["gpu"]
+# Enables the developer-facing visualization tools
+core-gui = []
+# Enables model training capabilities (work in progress)
+training = []
+# Enables the GPU backend using WGPU/WGSL
+gpu = ["wgpu"]

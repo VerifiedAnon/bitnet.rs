@@ -32,7 +32,7 @@ A minimal, standalone workspace for basic validation and prototyping of custom B
 ## How to Use
 
 ```sh
-cd burn-custom-kernel-test-0-17
+cd custom-kernel-test
 cargo test
 # or run specific experiments as needed
 ```

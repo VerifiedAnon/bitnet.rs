@@ -3,14 +3,24 @@ use std::io::{Read, Write};
 use tempfile::{NamedTempFile, tempdir};
 use bincode::serde::{encode_to_vec, decode_from_slice};
 use bincode::config::standard;
+use std::time::Instant;
+use bitnet_tools::test_utils::TestReporter;
+use lazy_static::lazy_static;
+use serial_test::serial;
 
 use bitnet_converter::packer::{
     BitNetModelRecord, TransformerBlockRecord, AttentionRecord, FeedForwardRecord, BitLinearRecord, RmsNormRecord, EmbeddingRecord, ModelMetadata
 };
 
-// Test 1: Serialize and deserialize a full BitNetModelRecord
-#[test]
-fn test_full_model_serialization() {
+// Initialize test reporter
+lazy_static! {
+    static ref TEST_REPORTER: TestReporter = TestReporter::new("serialization_test")
+        .expect("Failed to create test reporter");
+}
+
+fn do_full_model_serialization() {
+    let t0 = Instant::now();
+    TEST_REPORTER.log_message(1, "Running test_full_model_serialization...");
     // Create dummy model
     let embedding = EmbeddingRecord { weight: vec![1.0, 2.0, 3.0, 4.0], shape: vec![2, 2] };
     let norm = RmsNormRecord { weight: vec![0.1, 0.2], shape: vec![2] };
@@ -74,12 +84,14 @@ fn test_full_model_serialization() {
     assert_eq!(loaded.embedding.weight, vec![1.0, 2.0, 3.0, 4.0]);
     assert_eq!(loaded.blocks[0].attention.wqkv.packed_weights, vec![123, 456]);
     assert_eq!(loaded.lm_head.weight, vec![5.0, 6.0, 7.0, 8.0]);
-    println!("Test 1 Passed: Full model serialization/deserialization works.");
+    TEST_REPORTER.log_message(1, "Full model serialization/deserialization works.");
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_full_model_serialization", duration);
 }
 
-// Test 2: Serialize and deserialize a single TransformerBlockRecord (streaming)
-#[test]
-fn test_block_streaming_serialization() {
+fn do_block_streaming_serialization() {
+    let t0 = Instant::now();
+    TEST_REPORTER.log_message(2, "Running test_block_streaming_serialization...");
     let block = TransformerBlockRecord {
         attention: AttentionRecord {
             wqkv: BitLinearRecord {
@@ -123,12 +135,14 @@ fn test_block_streaming_serialization() {
     let (loaded, _): (TransformerBlockRecord, usize) = decode_from_slice(&buf, standard()).unwrap();
     assert_eq!(loaded.attention.wqkv.packed_weights, vec![1, 2]);
     assert_eq!(loaded.feed_forward.w2.packed_weights, vec![7, 8]);
-    println!("Test 2 Passed: Block streaming serialization/deserialization works.");
+    TEST_REPORTER.log_message(2, "Block streaming serialization/deserialization works.");
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_block_streaming_serialization", duration);
 }
 
-// Test 3: Save each block of a model to a separate file, then load and reassemble
-#[test]
-fn test_streaming_multiple_blocks() {
+fn do_streaming_multiple_blocks() {
+    let t0 = Instant::now();
+    TEST_REPORTER.log_message(3, "Running test_streaming_multiple_blocks...");
     let dir = tempdir().unwrap();
     let mut blocks = Vec::new();
     for i in 0..3 {
@@ -182,6 +196,17 @@ fn test_streaming_multiple_blocks() {
     assert_eq!(loaded_blocks.len(), 3);
     assert_eq!(loaded_blocks[1].attention.wqkv.packed_weights, vec![1, 2]);
     assert_eq!(loaded_blocks[2].feed_forward.w2.packed_weights, vec![8, 9]);
-    println!("Test 3 Passed: Streaming multiple blocks as separate files works.");
+    TEST_REPORTER.log_message(3, "Streaming multiple blocks as separate files works.");
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_streaming_multiple_blocks", duration);
+}
+
+#[test]
+#[serial]
+fn test_serialization_suite() {
+    do_full_model_serialization();
+    do_block_streaming_serialization();
+    do_streaming_multiple_blocks();
+    TEST_REPORTER.generate_report();
 }
 

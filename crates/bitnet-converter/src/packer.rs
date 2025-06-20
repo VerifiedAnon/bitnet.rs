@@ -6,6 +6,7 @@ use rayon::prelude::*;
 use std::sync::Arc;
 use thiserror::Error;
 use std::time::Instant;
+use rand::{self, Rng};
 
 // ================================================================================================
 // Error Handling
@@ -551,10 +552,10 @@ mod tests {
     fn test_optimized_quantization_correctness() {
         let n = 32;
         let k = 64;
-        let mut rng = rand::rng();
+        let mut rng = rand::thread_rng();
         
         let tensor: Vec<f32> = (0..n * k)
-            .map(|_| rng.random_range(-1.0..=1.0))
+            .map(|_| rng.gen_range(-1.0..=1.0))
             .collect();
         
         let (original_quant, _) = quantize_to_1_58_bit_optimized(&tensor, &[n, k]);
