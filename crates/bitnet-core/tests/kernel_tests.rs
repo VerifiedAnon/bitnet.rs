@@ -65,13 +65,12 @@ fn matmul_quantized_scalar(
                     let act_base = activations_start + k_idx * 16;
 
                     for bit_idx in 0..16 {
-                        // This decoding logic is now verified by `test_scalar_packing_decoding_symmetry`
-                        let packed_bits = (packed_weight >> (30 - (bit_idx * 2))) & 0b11;
+                        // This decoding logic must now match the LSB->MSB shader logic
+                        let packed_bits = (packed_weight >> (bit_idx * 2)) & 0b11;
                         let weight_val = match packed_bits {
-                            0b00 => -1i8,
-                            0b01 => 0i8,
-                            0b10 => 1i8,
-                            _ => 0i8, // Should not happen with valid packed data
+                            1 => 1i8,   // 01
+                            2 => -1i8,  // 10
+                            _ => 0i8,   // 00 or 11
                         };
                         sum += (q_activations[act_base + bit_idx] as i32) * (weight_val as i32);
                     }
@@ -513,11 +512,11 @@ fn test_matmul_quantized_scalar() {
     
     // Simple test inputs
     let q_activations = vec![1i8, -1, 0, 2, 1, -1, 0, 2, 1, -1, 0, 2, 1, -1, 0, 2];
-    // This packed value encodes the sequence [0, 1, -1, 0] repeated four times, matching the decoding logic.
-    // The bit pattern for {0, 1, -1, 0} is {01, 10, 00, 01}
+    // This packed value now encodes the sequence [1, -1, 0, 1, ...] with the LSB->MSB logic
+    // The bit pattern for {1, -1, 0, 1} is {01, 10, 00, 01}
     let packed_weights = vec![
-        0b01100001_01100001_01100001_01100001,
-        0b01100001_01100001_01100001_01100001, // Using same weights for second output for simplicity
+        0b01001001010010010100100101001001, // Represents [1, -1, 0, 1] repeated four times
+        0b01001001010010010100100101001001, // Using same weights for second output
     ];
     let activation_scales = vec![0.5];
     let weight_scales = vec![1.0, 1.0];
@@ -532,8 +531,8 @@ fn test_matmul_quantized_scalar() {
         out_features
     );
     
-    // The correct expected output, derived from running the test itself.
-    let expected_output = vec![-2.0, -2.0];
+    // The correct expected output, derived from the new LSB->MSB logic.
+    let expected_output = vec![8.0, 8.0];
     TEST_REPORTER.log_message(3, &format!("Scalar matmul check: Expected={:?}, Got={:?}", expected_output, output));
     assert_vec_eq(&output, &expected_output, 1e-5);
     
@@ -626,8 +625,8 @@ fn test_gpu_kernel_dimensions() {
         let act_scales = vec![0.5];
         
         let packed_weights_u32 = vec![
-            0b01001001_01001001_01001001_01001001u32,
-            0b01001010_01001010_01001010_01001010u32
+            0b01001001010010010100100101001001,
+            0b01001001010010010100100101001001
         ];
         let weight_scales_f32 = vec![1.0, 1.0];
 

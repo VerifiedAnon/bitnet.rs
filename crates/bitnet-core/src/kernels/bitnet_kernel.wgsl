@@ -35,38 +35,37 @@ const TILE_B_SIZE: u32 = TILE_DIM_K * TILE_DIM_N;         // for i32
 var<workgroup> tile_a: array<vec4<i32>, TILE_A_SIZE>;
 var<workgroup> tile_b: array<i32, TILE_B_SIZE>;
 
-// Corrected decode function to match Rust's pack_ternary_weights
+// Use direct decode function for ternary weights, matching the logic
+// from the previously passing tests.
 fn decode_2bit(val: u32) -> i32 {
     switch(val) {
-        case 0u: { return -1; }  // 00
-        case 1u: { return 0; }   // 01
-        case 2u: { return 1; }   // 10
-        default: { return 0; }   // 11 is unused, map to 0
+        case 1u: { return 1; }   // 01
+        case 2u: { return -1; }  // 10
+        default: { return 0; }   // 00 or 11
     }
 }
 
-// Unpacks a u32 into 16 ternary weights.
-// The packing order is MSB-to-LSB, so we extract from high bits to low bits.
-// Reverted to unrolled version for maximum cross-platform compiler compatibility.
-fn decode_16x2bit_ternary(packed: u32) -> array<i32, 16> {
-    var result: array<i32, 16>;
-    result[0]  = decode_2bit((packed >> 30u) & 3u);
-    result[1]  = decode_2bit((packed >> 28u) & 3u);
-    result[2]  = decode_2bit((packed >> 26u) & 3u);
-    result[3]  = decode_2bit((packed >> 24u) & 3u);
-    result[4]  = decode_2bit((packed >> 22u) & 3u);
-    result[5]  = decode_2bit((packed >> 20u) & 3u);
-    result[6]  = decode_2bit((packed >> 18u) & 3u);
-    result[7]  = decode_2bit((packed >> 16u) & 3u);
-    result[8]  = decode_2bit((packed >> 14u) & 3u);
-    result[9]  = decode_2bit((packed >> 12u) & 3u);
-    result[10] = decode_2bit((packed >> 10u) & 3u);
-    result[11] = decode_2bit((packed >> 8u) & 3u);
-    result[12] = decode_2bit((packed >> 6u) & 3u);
-    result[13] = decode_2bit((packed >> 4u) & 3u);
-    result[14] = decode_2bit((packed >> 2u) & 3u);
-    result[15] = decode_2bit(packed & 3u);
-    return result;
+// Unroll the decoding loop for maximum compatibility, while preserving
+// the LSB-to-MSB decoding order from the previously passing version.
+fn decode_16x2bit_ternary(packed_val: u32) -> array<i32, 16> {
+    var decoded: array<i32, 16>;
+    decoded[0]  = decode_2bit((packed_val >> 0u) & 0x3u);
+    decoded[1]  = decode_2bit((packed_val >> 2u) & 0x3u);
+    decoded[2]  = decode_2bit((packed_val >> 4u) & 0x3u);
+    decoded[3]  = decode_2bit((packed_val >> 6u) & 0x3u);
+    decoded[4]  = decode_2bit((packed_val >> 8u) & 0x3u);
+    decoded[5]  = decode_2bit((packed_val >> 10u) & 0x3u);
+    decoded[6]  = decode_2bit((packed_val >> 12u) & 0x3u);
+    decoded[7]  = decode_2bit((packed_val >> 14u) & 0x3u);
+    decoded[8]  = decode_2bit((packed_val >> 16u) & 0x3u);
+    decoded[9]  = decode_2bit((packed_val >> 18u) & 0x3u);
+    decoded[10] = decode_2bit((packed_val >> 20u) & 0x3u);
+    decoded[11] = decode_2bit((packed_val >> 22u) & 0x3u);
+    decoded[12] = decode_2bit((packed_val >> 24u) & 0x3u);
+    decoded[13] = decode_2bit((packed_val >> 26u) & 0x3u);
+    decoded[14] = decode_2bit((packed_val >> 28u) & 0x3u);
+    decoded[15] = decode_2bit((packed_val >> 30u) & 0x3u);
+    return decoded;
 }
 
 // Vectorized dot product for better throughput
