@@ -1,4 +1,4 @@
-# Burn Custom Kernel Test (`burn-custom-kernel-test-0-17`)
+# Custom Kernel Test
 
 A minimal, standalone workspace for basic validation and prototyping of custom BitNet kernel logic, separate from the main BitNet project. Useful for debugging, rapid iteration, and verifying kernel correctness in isolation.
 
