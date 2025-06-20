@@ -3,7 +3,6 @@
 use eframe::{egui, App};
 use rfd::FileDialog;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use bitnet_tools::combine::{is_combined_file, file_matches_filter, combine_files_to_path};
 use ignore::WalkBuilder;

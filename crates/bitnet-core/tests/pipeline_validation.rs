@@ -1,5 +1,4 @@
 use bitnet_core::model::Transformer;
-use bitnet_core::settings::InferenceSettings;
 use bitnet_core::tokenizer::Tokenizer;
 use bitnet_tools::constants::{converted_dir, DEFAULT_MODEL_ID};
 use serial_test::serial;

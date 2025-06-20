@@ -1,10 +1,8 @@
 use std::path::PathBuf;
 use serde::Deserialize;
-use std::fs::File;
-use std::io::Write;
 use bincode::serde::encode_to_vec;
 use bincode::config::standard;
-use bitnet_tools::constants::{workspace_root, CONFIG_JSON, SAFETENSORS_FILE, PACKED_MODEL_FILE};
+use bitnet_tools::constants::{workspace_root, CONFIG_JSON, SAFETENSORS_FILE};
 use std::time::Instant;
 use rayon::prelude::*;
 

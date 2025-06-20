@@ -16,12 +16,15 @@ use std::sync::Arc;
 ///
 /// * `device` - The WGPU device for executing compute operations.
 /// * `queue` - The command queue for submitting GPU commands.
+/// * `features` - The features enabled on the device.
 #[derive(Clone, Debug)]
 pub struct WgpuContext {
     /// The WGPU device, wrapped in Arc for thread-safe sharing.
     pub device: Arc<wgpu::Device>,
     /// The WGPU command queue, wrapped in Arc for thread-safe sharing.
     pub queue: Arc<wgpu::Queue>,
+    /// The features enabled on the device.
+    pub features: wgpu::Features,
 }
 
 impl WgpuContext {
@@ -60,14 +63,29 @@ impl WgpuContext {
             .await
             .ok_or(BitNetError::NoSuitableAdapter)?;
 
+        let mut required_features = wgpu::Features::empty();
+        if adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+            required_features |= wgpu::Features::TIMESTAMP_QUERY;
+        }
+
         let (device, queue) = adapter
-            .request_device(&Default::default(), None)
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("Bitnet Device"),
+                    required_features,
+                    required_limits: Default::default(),
+                },
+                None,
+            )
             .await
             .map_err(BitNetError::RequestDeviceError)?;
+
+        let features = device.features();
 
         Ok(Self {
             device: Arc::new(device),
             queue: Arc::new(queue),
+            features,
         })
     }
 
@@ -87,11 +105,16 @@ impl WgpuContext {
             .await
             .ok_or(BitNetError::NoSuitableAdapter)?;
 
+        let mut required_features = wgpu::Features::empty();
+        if adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+            required_features |= wgpu::Features::TIMESTAMP_QUERY;
+        }
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("Custom Device"),
-                    required_features: wgpu::Features::empty(),
+                    required_features,
                     required_limits: limits,
                 },
                 None,
@@ -99,9 +122,12 @@ impl WgpuContext {
             .await
             .map_err(BitNetError::RequestDeviceError)?;
 
+        let features = device.features();
+
         Ok(Self {
             device: Arc::new(device),
             queue: Arc::new(queue),
+            features,
         })
     }
 }

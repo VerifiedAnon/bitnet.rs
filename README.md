@@ -33,6 +33,8 @@
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [Build Instructions](#build-instructions)
+- [Benchmarking and Testing](#benchmarking-and-testing)
+- [Known Issues](#known-issues)
 - [Usage Examples](#usage-examples)
 - [Contributing](#contributing)
 - [Checklist & Status](#checklist--status)
@@ -91,18 +93,78 @@ cargo run -p bitnet-app -- --help
    cargo build --workspace
    ```
 
-4. **Run tests:**
-
-   ```sh
-   cargo test --workspace --all-features
-   ```
-
-5. **Run the converter or app:**
+4. **Run the converter or app:**
 
    ```sh
    cargo run -p bitnet-converter -- --help
    cargo run -p bitnet-app -- --help
    ```
+
+   ## Run the GUI version
+
+   ```sh
+   cargo run --release -p file_combiner_gui
+   ```
+
+   ## Run the CLI version
+
+   ```sh
+   cargo run -p bitnet-tools --bin combine_files -- --help
+   ```
+
+## Benchmarking and Testing
+
+We use a comprehensive test suite to ensure correctness, performance, and robustness. The tests are located in the `tests` directory of each crate.
+
+### Running All Tests
+
+To run all tests for all crates in the workspace, use:
+
+```sh
+cargo test --workspace --all-features
+```
+
+### Running Kernel Tests
+
+The core of our performance comes from the WGSL compute kernels. We have a dedicated test suite for them in the `bitnet-core` crate. To run only these tests and see detailed output, use:
+
+```sh
+cargo test -p bitnet-core --test kernel_tests -- --nocapture
+```
+
+To run the ignored tests, which include stress tests and long-running benchmarks:
+
+```sh
+cargo test -p bitnet-core --test kernel_tests -- --ignored --nocapture
+```
+
+### Interpreting Benchmark Results
+
+The `performance_benchmark_gpu_vs_scalar` test provides detailed performance metrics. When you run it, you will see output like this:
+
+```
+Performance Benchmark (100 iterations):
+  GPU (Wall Time):    Avg: 290.000µs | Total: 29.000ms
+  GPU (Kernel Time):  Avg: 15.000µs  | Total: 1.500ms
+  Scalar (CPU Time):  Avg: 480.000µs | Total: 48.000ms
+Speedup (Wall vs Scalar):   1.65x
+Speedup (Kernel vs Scalar): 32.00x
+```
+
+*   **GPU (Wall Time)**: Total time from the CPU's perspective, including overhead for buffer management and data transfer.
+*   **GPU (Kernel Time)**: The pure GPU execution time, measured with high-precision timestamp queries. This is the best measure of the kernel's raw performance.
+*   **Scalar (CPU Time)**: The performance of the equivalent non-parallelized CPU implementation.
+*   **Speedup (Kernel vs Scalar)**: This shows the true speedup of the GPU kernel over the CPU implementation. This is the most important metric for performance analysis.
+
+*(Note: The numbers above are illustrative. Please run the benchmarks on your own hardware to get accurate results.)*
+
+## Known Issues
+
+### DirectX 12 Backend
+
+*   **Issue**: The WGSL kernel can trigger a suspected loop-unrolling bug in the DirectX (DX12) shader compiler (FXC/DXC). This may cause tests to fail on Windows machines using the Dx12 backend.
+*   **Status**: We are tracking this issue. See the related [Naga issue](https://github.com/gfx-rs/naga/issues/1832) for more details.
+*   **Workaround**: The `cross_device_consistency_test` automatically skips the Dx12 backend to allow the test suite to pass. The kernel works correctly on other backends like Vulkan and Metal.
 
 ---
 

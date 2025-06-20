@@ -43,7 +43,6 @@
 //! - Workgroup-level parallelism on GPU
 
 use bytemuck::{Pod, Zeroable};
-use std::time::Instant;
 use crate::error::BitNetError;
 
 /// Metadata for BitNet kernel execution.

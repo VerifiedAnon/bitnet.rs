@@ -3,10 +3,9 @@
 use crate::source::TensorMap;
 use serde::{Serialize, Deserialize};
 use rayon::prelude::*;
-use std::sync::Arc;
 use thiserror::Error;
 use std::time::Instant;
-use rand::{self, Rng};
+use rand::{self};
 
 // ================================================================================================
 // Error Handling

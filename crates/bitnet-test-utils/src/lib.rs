@@ -1,11 +1,13 @@
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use chrono::{self, DateTime, Local};
 use crate::constants::workspace_root;
+use tokio::sync::oneshot;
 
 /// A struct to manage test reporting functionality
 pub struct TestReporter {
@@ -13,6 +15,8 @@ pub struct TestReporter {
     timings: Mutex<HashMap<String, std::time::Duration>>,
     log_dir: PathBuf,
     test_name: String,
+    active_tests: Arc<AtomicUsize>,
+    report_ready_tx: Mutex<Option<oneshot::Sender<()>>>,
 }
 
 impl TestReporter {
@@ -26,7 +30,21 @@ impl TestReporter {
             timings: Mutex::new(HashMap::new()),
             log_dir,
             test_name: log_name.to_string(),
+            active_tests: Arc::new(AtomicUsize::new(0)),
+            report_ready_tx: Mutex::new(None),
         })
+    }
+
+    pub fn start_test(&self) {
+        self.active_tests.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub fn finish_test(&self) {
+        if self.active_tests.fetch_sub(1, Ordering::SeqCst) == 1 {
+            if let Some(tx) = self.report_ready_tx.lock().unwrap().take() {
+                let _ = tx.send(());
+            }
+        }
     }
 
     /// Logs a general message with a test ID and timestamp to the in-memory log
@@ -46,10 +64,24 @@ impl TestReporter {
             .lock()
             .unwrap()
             .insert(test_name.to_string(), duration);
+        self.finish_test();
     }
 
     /// Generates a markdown report from in-memory logs
-    pub fn generate_report(&self) {
+    pub async fn generate_report(&self) {
+        let (tx, rx) = oneshot::channel();
+        *self.report_ready_tx.lock().unwrap() = Some(tx);
+
+        // If no tests were ever started, don't wait forever.
+        if self.active_tests.load(Ordering::SeqCst) == 0 {
+            if let Some(tx) = self.report_ready_tx.lock().unwrap().take() {
+                let _ = tx.send(());
+            }
+        }
+        
+        // Wait for the signal that all tests are done
+        let _ = rx.await;
+
         let timings = self.timings.lock().unwrap();
         let mut info_logs = self.info_logs.lock().unwrap();
 

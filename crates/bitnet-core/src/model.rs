@@ -64,10 +64,6 @@ use crate::{
     wgpu_context::WgpuContext,
     error::BitNetError,
 };
-use std::fs;
-use std::path::Path;
-use bincode::serde::decode_from_slice;
-use bincode::config::standard;
 
 /// Configuration for a BitNet model.
 ///

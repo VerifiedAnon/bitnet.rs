@@ -45,11 +45,10 @@
 //!
 //! See the BitNet paper for details on the quantization scheme.
 
-use crate::kernels::{BitnetMetadata, pack_ternary_weights, calculate_weight_scales};
+use crate::kernels::{BitnetMetadata, pack_ternary_weights};
 use crate::wgpu_context::WgpuContext;
 use bitnet_converter::packer::BitLinearRecord;
 use wgpu::util::DeviceExt;
-use crate::error::BitNetError;
 use futures_intrusive::channel::shared as channel;
 
 /// Quantized linear layer using 1.58-bit weights.
@@ -99,7 +98,7 @@ impl BitLinear {
     /// Creates a new BitLinear layer from raw weights.
     pub fn new(weights: Vec<Vec<i8>>, in_features: usize, out_features: usize) -> Self {
         // Pack weights and calculate scales
-        let (packed_weights, weight_scales) = pack_ternary_weights(&weights);
+        let (packed_weights, weight_scales) = pack_ternary_weights(&weights).unwrap();
         
         Self {
             packed_weights,

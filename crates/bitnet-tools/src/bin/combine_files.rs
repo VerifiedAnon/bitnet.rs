@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use bitnet_tools::combine::{is_combined_file, file_matches_filter, collect_files, combine_files_to_path};
-use std::fs;
+use bitnet_tools::combine::{collect_files, combine_files_to_path};
 use bitnet_tools::constants::workspace_root;
 
 fn print_help() {
