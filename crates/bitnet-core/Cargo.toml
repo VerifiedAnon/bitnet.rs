@@ -25,22 +25,23 @@ rustdoc-args = ["--cfg", "docsrs"]
 bincode = { workspace = true }
 
 # Utilities for loading and configuration
-serde = { workspace = true }
-serde_json = { workspace = true }
+serde = { workspace = true, version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 hf-hub = { workspace = true }
 safetensors = { workspace = true }
 tokenizers = { workspace = true }
 thiserror = "1.0.57"
 log = { workspace = true }
 tracing = { workspace = true }
-bytemuck = { workspace = true }
+bytemuck = { workspace = true, version = "1.12.3", features = ["derive"] }
 pollster = { workspace = true }
 derive-new = "0.7.0"
 bitnet-tools = { path = "../bitnet-tools" }
-wgpu = { version = "25.0.2", optional = true }
+wgpu = { version = "0.20.0", features = ["naga"], optional = true }
 rand = "0.9.1"
 tokio = { version = "1.36.0", features = ["full"] }
 futures-intrusive = "0.5"
+futures = "0.3"
 bitnet-converter = { path = "../bitnet-converter" }
 half = "2"
 memmap2 = "0.9"

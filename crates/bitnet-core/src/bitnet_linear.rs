@@ -293,11 +293,10 @@ impl BitLinear {
         });
 
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: None,
+            label: Some("Bitnet Pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader,
-            entry_point: Some("main"),
-            cache: None,
+            entry_point: "main",
             compilation_options: Default::default(),
         });
 

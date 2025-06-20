@@ -79,7 +79,8 @@ fn main(
     // Main tiling loop with optimizations
     let num_k_tiles = (metadata.K + TILE_DIM_K - 1u) / TILE_DIM_K;
     
-    for (var k_tile_idx = 0u; k_tile_idx < num_k_tiles; k_tile_idx = k_tile_idx + 1u) {
+    var k_tile_idx = 0u;
+    while (k_tile_idx < num_k_tiles) {
         let k_tile_start = k_tile_idx * TILE_DIM_K;
         
         // === Cooperative Loading with Coalescing ===
@@ -188,6 +189,8 @@ fn main(
         }
         
         workgroupBarrier();
+
+        k_tile_idx = k_tile_idx + 1u;
     }
     
     // === Write Results with Proper Scaling ===

@@ -16,7 +16,7 @@ use std::sync::Arc;
 ///
 /// * `device` - The WGPU device for executing compute operations.
 /// * `queue` - The command queue for submitting GPU commands.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct WgpuContext {
     /// The WGPU device, wrapped in Arc for thread-safe sharing.
     pub device: Arc<wgpu::Device>,
@@ -58,11 +58,46 @@ impl WgpuContext {
                 compatible_surface: None,
             })
             .await
-            .map_err(|_| BitNetError::NoSuitableAdapter)?;
+            .ok_or(BitNetError::NoSuitableAdapter)?;
 
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default())
-            .await?;
+            .request_device(&Default::default(), None)
+            .await
+            .map_err(BitNetError::RequestDeviceError)?;
+
+        Ok(Self {
+            device: Arc::new(device),
+            queue: Arc::new(queue),
+        })
+    }
+
+    /// Creates a new WGPU context with specific device limits.
+    ///
+    /// This is useful for testing purposes, e.g., to request unsupported limits
+    /// and verify error handling.
+    pub async fn new_with_limits(limits: wgpu::Limits) -> Result<Self, BitNetError> {
+        let instance = wgpu::Instance::default();
+        
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                force_fallback_adapter: false,
+                compatible_surface: None,
+            })
+            .await
+            .ok_or(BitNetError::NoSuitableAdapter)?;
+
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("Custom Device"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: limits,
+                },
+                None,
+            )
+            .await
+            .map_err(BitNetError::RequestDeviceError)?;
 
         Ok(Self {
             device: Arc::new(device),
