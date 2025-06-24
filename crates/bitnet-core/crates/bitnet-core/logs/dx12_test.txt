@@ -1,0 +1,99 @@
+Claude Dx12 Shader Bug Test Report - Generated on Mon, 23 Jun 2025 12:43:48 -0400
+-> Found Dx12 adapter: NVIDIA GeForce RTX 2070 SUPER (Dx12)
+
+--- Testing: Original Buggy ---
+Attempting to compile Original Buggy WGSL kernel for Dx12...
+ERROR: Original Buggy shader compilation failed: Validation Error: In Device::create_shader_module
+
+--- Testing: Fix V1 ---
+Attempting to compile Fix V1 WGSL kernel for Dx12...
+SUCCESS: Fix V1 shader module compiled on Dx12 without error.
+ERROR: Fix V1 pipeline creation failed: Validation Error: In Device::create_compute_pipeline
+
+--- Testing: Fix V2 ---
+Attempting to compile Fix V2 WGSL kernel for Dx12...
+SUCCESS: Fix V2 shader module compiled on Dx12 without error.
+ERROR: Fix V2 pipeline creation failed: Validation Error: In Device::create_compute_pipeline
+
+--- Testing: Fix V3 ---
+Attempting to compile Fix V3 WGSL kernel for Dx12...
+SUCCESS: Fix V3 shader module compiled on Dx12 without error.
+ERROR: Fix V3 pipeline creation failed: Validation Error: In Device::create_compute_pipeline
+
+--- Testing: Fix V4 - Simplified Workgroup ---
+Attempting to compile Fix V4 - Simplified Workgroup WGSL kernel for Dx12...
+SUCCESS: Fix V4 - Simplified Workgroup shader module compiled on Dx12 without error.
+SUCCESS: Fix V4 - Simplified Workgroup compute pipeline created successfully on Dx12!
+
+--- Testing: Fix V5 - Minimal Kernel ---
+Attempting to compile Fix V5 - Minimal Kernel WGSL kernel for Dx12...
+SUCCESS: Fix V5 - Minimal Kernel shader module compiled on Dx12 without error.
+SUCCESS: Fix V5 - Minimal Kernel compute pipeline created successfully on Dx12!
+
+--- Testing: Fix V6 - F32 Vectors ---
+Attempting to compile Fix V6 - F32 Vectors WGSL kernel for Dx12...
+SUCCESS: Fix V6 - F32 Vectors shader module compiled on Dx12 without error.
+SUCCESS: Fix V6 - F32 Vectors compute pipeline created successfully on Dx12!
+
+--- Testing: Fix V7 - No Workgroup Memory ---
+Attempting to compile Fix V7 - No Workgroup Memory WGSL kernel for Dx12...
+SUCCESS: Fix V7 - No Workgroup Memory shader module compiled on Dx12 without error.
+SUCCESS: Fix V7 - No Workgroup Memory compute pipeline created successfully on Dx12!
+
+--- Incremental Complexity Tests (V4 Base) ---
+
+--- Testing: V4.1 - V4 + Workgroup Tile Declaration ---
+Attempting to compile V4.1 - V4 + Workgroup Tile Declaration WGSL kernel for Dx12...
+SUCCESS: V4.1 - V4 + Workgroup Tile Declaration shader module compiled on Dx12 without error.
+SUCCESS: V4.1 - V4 + Workgroup Tile Declaration compute pipeline created successfully on Dx12!
+
+--- Testing: V4.2.1 - V4.1 + Tile_A Loading ---
+Attempting to compile V4.2.1 - V4.1 + Tile_A Loading WGSL kernel for Dx12...
+SUCCESS: V4.2.1 - V4.1 + Tile_A Loading shader module compiled on Dx12 without error.
+SUCCESS: V4.2.1 - V4.1 + Tile_A Loading compute pipeline created successfully on Dx12!
+
+--- Testing: V4.2.2 - V4.1 + Tile_B Loading (Unrolled) ---
+Attempting to compile V4.2.2 - V4.1 + Tile_B Loading (Unrolled) WGSL kernel for Dx12...
+SUCCESS: V4.2.2 - V4.1 + Tile_B Loading (Unrolled) shader module compiled on Dx12 without error.
+ERROR: V4.2.2 - V4.1 + Tile_B Loading (Unrolled) pipeline creation failed: Validation Error: In Device::create_compute_pipeline
+
+--- Testing: V4.2.3 - V4.2.2 + Inlined Tile_B Loading ---
+Attempting to compile V4.2.3 - V4.2.2 + Inlined Tile_B Loading WGSL kernel for Dx12...
+SUCCESS: V4.2.3 - V4.2.2 + Inlined Tile_B Loading shader module compiled on Dx12 without error.
+SUCCESS: V4.2.3 - V4.2.2 + Inlined Tile_B Loading compute pipeline created successfully on Dx12!
+
+--- Testing: V4.2 - V4.1 + Combined Workgroup Loading ---
+Attempting to compile V4.2 - V4.1 + Combined Workgroup Loading WGSL kernel for Dx12...
+ERROR: V4.2 - V4.1 + Combined Workgroup Loading shader compilation failed: Validation Error: In Device::create_shader_module
+
+--- Testing: V4.3 - V4.2 + Main Computation ---
+Attempting to compile V4.3 - V4.2 + Main Computation WGSL kernel for Dx12...
+ERROR: V4.3 - V4.2 + Main Computation shader compilation failed: Validation Error: In Device::create_shader_module
+
+--- Full Kernel and Production Tests ---
+
+--- Testing: Full Kernel with V4 Fix ---
+Attempting to compile Full Kernel with V4 Fix WGSL kernel for Dx12...
+SUCCESS: Full Kernel with V4 Fix shader module compiled on Dx12 without error.
+ERROR: Full Kernel with V4 Fix pipeline creation failed: Validation Error: In Device::create_compute_pipeline
+
+--- Testing: Production Kernel from file (bitnet_kernel.wgsl) ---
+Attempting to compile Production Kernel from file (bitnet_kernel.wgsl) WGSL kernel for Dx12...
+SUCCESS: Production Kernel from file (bitnet_kernel.wgsl) shader module compiled on Dx12 without error.
+ERROR: Production Kernel from file (bitnet_kernel.wgsl) pipeline creation failed: Validation Error: In Device::create_compute_pipeline
+
+--- Running Correctness Test on Dx12 with Fixed Kernel ---
+SUCCESS: Fixed kernel compiled on Dx12.
+ERROR: Correctness test failed at PIPELINE CREATION: Validation Error: In Device::create_compute_pipeline
+
+--- Testing: V4.2.2.1 - Function-Returned Array, Partial Write ---
+Attempting to compile V4.2.2.1 - Function-Returned Array, Partial Write WGSL kernel for Dx12...
+ERROR: V4.2.2.1 - Function-Returned Array, Partial Write shader compilation failed: Validation Error: In Device::create_shader_module
+
+--- Testing: V4.2.2.2 - Function-Returned Array, Local Copy ---
+Attempting to compile V4.2.2.2 - Function-Returned Array, Local Copy WGSL kernel for Dx12...
+ERROR: V4.2.2.2 - Function-Returned Array, Local Copy shader compilation failed: Validation Error: In Device::create_shader_module
+
+--- Testing: V4.2.2.3 - Function-Returned Array, Write to Private Array ---
+Attempting to compile V4.2.2.3 - Function-Returned Array, Write to Private Array WGSL kernel for Dx12...
+ERROR: V4.2.2.3 - Function-Returned Array, Write to Private Array shader compilation failed: Validation Error: In Device::create_shader_module

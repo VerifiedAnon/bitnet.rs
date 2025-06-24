@@ -85,10 +85,11 @@ fn main(
     let tile_start_m = workgroup_id.y * TILE_DIM_M;
     let tile_start_n = workgroup_id.x * TILE_DIM_N;
     
-    // Vectorized accumulators for better performance  
-    var accumulators: array<vec4<i32>, THREAD_TILE_M>;
-    for (var i = 0u; i < THREAD_TILE_M; i = i + 1u) {
-        accumulators[i] = vec4<i32>(0);
+    // FIX 1: Use a flattened array of i32 for the accumulator to avoid the
+    // `array<vec4<i32>>` indexing bug on the Dx12 backend.
+    var accumulators: array<i32, 16>;
+    for (var i = 0u; i < 16u; i = i + 1u) {
+        accumulators[i] = 0;
     }
     
     // Main tiling loop with optimizations
@@ -145,7 +146,27 @@ fn main(
                 if (global_n < metadata.N && global_k_packed_idx < metadata.K_packed) {
                     let weight_idx = global_n * metadata.K_packed + global_k_packed_idx;
                     let packed_w = packed_weights[weight_idx];
-                    let decoded = decode_16x2bit_ternary(packed_w);
+
+                    // FIX 2: Inline the decoding logic. The Dx12 backend fails pipeline
+                    // creation when a function returns an array, as seen in the V4.2.2 test.
+                    var decoded: array<i32, 16>;
+                    decoded[0]  = decode_2bit((packed_w >> 0u) & 0x3u);
+                    decoded[1]  = decode_2bit((packed_w >> 2u) & 0x3u);
+                    decoded[2]  = decode_2bit((packed_w >> 4u) & 0x3u);
+                    decoded[3]  = decode_2bit((packed_w >> 6u) & 0x3u);
+                    decoded[4]  = decode_2bit((packed_w >> 8u) & 0x3u);
+                    decoded[5]  = decode_2bit((packed_w >> 10u) & 0x3u);
+                    decoded[6]  = decode_2bit((packed_w >> 12u) & 0x3u);
+                    decoded[7]  = decode_2bit((packed_w >> 14u) & 0x3u);
+                    decoded[8]  = decode_2bit((packed_w >> 16u) & 0x3u);
+                    decoded[9]  = decode_2bit((packed_w >> 18u) & 0x3u);
+                    decoded[10] = decode_2bit((packed_w >> 20u) & 0x3u);
+                    decoded[11] = decode_2bit((packed_w >> 22u) & 0x3u);
+                    decoded[12] = decode_2bit((packed_w >> 24u) & 0x3u);
+                    decoded[13] = decode_2bit((packed_w >> 26u) & 0x3u);
+                    decoded[14] = decode_2bit((packed_w >> 28u) & 0x3u);
+                    decoded[15] = decode_2bit((packed_w >> 30u) & 0x3u);
+
                     // Store decoded weights (unrolled for WGSL compliance)
                     tile_b[n * TILE_DIM_K + k + 0u] = decoded[0u];
                     tile_b[n * TILE_DIM_K + k + 1u] = decoded[1u];
@@ -198,7 +219,9 @@ fn main(
                 // Vectorized multiply-accumulate
                 for (var m = 0u; m < THREAD_TILE_M; m = m + 1u) {
                     let dot_result = dot_product_4x4(a_vecs[m], b_vec);
-                    accumulators[m][n] += dot_result;
+                    // Manually calculate the 1D index for the flattened accumulator.
+                    let acc_idx = m * THREAD_TILE_N + n;
+                    accumulators[acc_idx] += dot_result;
                 }
             }
         }
@@ -218,7 +241,9 @@ fn main(
                 // BitNet B1.58 scaling: result = activation_scale * weight_scale * dot_product
                 let activation_scale = activation_scales[global_m];
                 let weight_scale = weight_scales[global_n];
-                let final_result = f32(accumulators[m][n]) * activation_scale * weight_scale;
+                // Use the manually calculated 1D index again.
+                let acc_idx = m * THREAD_TILE_N + n;
+                let final_result = f32(accumulators[acc_idx]) * activation_scale * weight_scale;
                 
                 output[global_m * metadata.N + global_n] = final_result;
             }
