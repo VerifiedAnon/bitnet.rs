@@ -163,8 +163,28 @@ Speedup (Kernel vs Scalar): 32.00x
 ### DirectX 12 Backend
 
 *   **Issue**: The WGSL kernel can trigger a suspected loop-unrolling bug in the DirectX (DX12) shader compiler (FXC/DXC). This may cause tests to fail on Windows machines using the Dx12 backend.
-*   **Status**: We are tracking this issue. See the related [Naga issue](https://github.com/gfx-rs/naga/issues/1832) for more details.
-*   **Workaround**: The `cross_device_consistency_test` automatically skips the Dx12 backend to allow the test suite to pass. The kernel works correctly on other backends like Vulkan and Metal.
+*   **Status**: **A robust workaround has been found and is now fully documented and tested.**
+    - The workaround uses a flattened i32 accumulator and per-element decode for tile_b, avoiding the problematic WGSL patterns.
+    - The full BitNet kernel logic now passes on DX12 with this fix.
+    - See the [DX12 test report](logs/dx12_test.md) for the special finding and full details.
+*   **Reference**: See the related [Naga issue](https://github.com/gfx-rs/naga/issues/1832) for more details.
+*   **Legacy note**: The `cross_device_consistency_test` previously skipped the Dx12 backend, but with the workaround, DX12 is now supported for the full kernel logic.
+
+### DX12 Regression Testing
+
+To ensure the DX12 workaround remains effective and to prevent regressions:
+
+- The file [`crates/bitnet-core/tests/DX12_test.rs`](crates/bitnet-core/tests/DX12_test.rs) is a comprehensive diagnostic and regression test suite for the DX12 WGSL bug.
+- **To run the regression test:**
+  ```sh
+  cargo test --package bitnet-core --test DX12_test -- --nocapture
+  ```
+- This will generate a detailed report at [`logs/dx12_test.md`](logs/dx12_test.md).
+- **Check the report:**
+  - Look for the ⭐ **Special Finding** section, which highlights the test demonstrating the robust workaround.
+  - Ensure that the "Full Kernel With Fix" test passes. If it fails, DX12 compatibility may be broken.
+- **Best practice:**
+  - Run this regression test after any changes to the kernel or related code to ensure the workaround is not broken and the bug is not reintroduced.
 
 ---
 
