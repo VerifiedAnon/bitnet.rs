@@ -22,6 +22,13 @@ enum TestStatus {
     Fail,
 }
 
+#[derive(Clone)]
+pub struct SpecialFinding {
+    pub test_name: String,
+    pub label: String,
+    pub description: String,
+}
+
 /// A struct to manage test reporting functionality
 pub struct TestReporter {
     info_logs: Mutex<Vec<(usize, Instant, DateTime<Local>, String)>>,
@@ -30,6 +37,7 @@ pub struct TestReporter {
     test_name: String,
     // Store all test results
     results: Mutex<Vec<TestResult>>,
+    special_finding: Mutex<Option<SpecialFinding>>,
 }
 
 impl TestReporter {
@@ -44,6 +52,7 @@ impl TestReporter {
             log_dir,
             test_name: log_name.to_string(),
             results: Mutex::new(Vec::new()),
+            special_finding: Mutex::new(None),
         })
     }
 
@@ -144,11 +153,22 @@ impl TestReporter {
         }
     }
 
+    /// Record a special finding (e.g., workaround/fix) to be highlighted in the report
+    pub fn record_special_finding(&self, test_name: &str, label: &str, description: &str) {
+        let mut sf = self.special_finding.lock().unwrap();
+        *sf = Some(SpecialFinding {
+            test_name: test_name.to_string(),
+            label: label.to_string(),
+            description: description.to_string(),
+        });
+    }
+
     /// Generates a markdown report from in-memory logs
     pub fn generate_report(&self) {
         let timings = self.timings.lock().unwrap();
         let mut info_logs = self.info_logs.lock().unwrap();
         let results = self.results.lock().unwrap();
+        let special_finding = self.special_finding.lock().unwrap();
 
         if results.is_empty() && timings.is_empty() && info_logs.is_empty() {
             println!("No test data found, skipping report generation.");
@@ -238,6 +258,12 @@ impl TestReporter {
                     ).expect("Failed to write test result");
                 }
             }
+        }
+
+        if let Some(sf) = &*special_finding {
+            writeln!(report_file, "\n## ⭐ Special Finding\n").expect("Failed to write special finding header");
+            writeln!(report_file, "**[{}]**: `{}`  ", sf.label, sf.test_name).expect("Failed to write special finding label");
+            writeln!(report_file, "{}\n", sf.description).expect("Failed to write special finding description");
         }
 
         if !info_logs.is_empty() {
