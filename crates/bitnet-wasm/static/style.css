@@ -1,3 +1,283 @@
+/* Tailwind-inspired dark theme for BitNet WASM Demo */
+:root {
+  --bg: #181a20;
+  --bg-alt: #23262f;
+  --fg: #f4f4f9;
+  --fg-muted: #b0b3c7;
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --border: #2a2d3a;
+  --shadow: 0 2px 8px rgba(0,0,0,0.15);
+  --radius: 0.75rem;
+  --font-main: 'Inter', 'Roboto', 'Segoe UI', Arial, sans-serif;
+  --font-mono: 'Fira Mono', 'Menlo', 'Consolas', monospace;
+}
+
+body.dark-bg {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-main);
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 900px;
+  margin: auto;
+  background: var(--bg-alt);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 2rem 2.5rem 2.5rem 2.5rem;
+  min-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.main-title {
+  font-size: 2.2rem;
+  font-weight: 700;
+  margin-bottom: 1.5rem;
+  color: var(--accent);
+  letter-spacing: 0.01em;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  font-size: 1.1rem;
+  padding: 0.7rem 1.5rem;
+  border-radius: var(--radius) var(--radius) 0 0;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.tab-btn.active {
+  background: var(--bg);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: 0 2px 0 var(--accent);
+}
+
+.tab-content {
+  display: block;
+  background: var(--bg);
+  border-radius: 0 0 var(--radius) var(--radius);
+  box-shadow: var(--shadow);
+  padding: 2rem 1.5rem 1.5rem 1.5rem;
+  margin-bottom: 0.5rem;
+  flex: 1 1 auto;
+  min-height: 350px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+.tab-content.hidden {
+  display: none;
+}
+
+.section-label {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+  margin-bottom: 0.7rem;
+  letter-spacing: 0.02em;
+}
+
+/* Test Suits Tab */
+.test-buttons-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.7rem;
+  background: var(--bg-alt);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.2rem 1rem 1rem 1rem;
+  margin-bottom: 1.2rem;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.test-controls {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
+  margin-top: 0.5rem;
+}
+.test-controls-bottom {
+  margin-top: 1.2rem;
+}
+
+.console-area {
+  width: 100%;
+  min-height: 180px;
+  background: #181a20;
+  color: #e5e7ef;
+  font-family: var(--font-mono);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  resize: vertical;
+  box-sizing: border-box;
+  margin-bottom: 0;
+  overflow-y: scroll;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  border: 0;
+}
+
+.test-buttons {
+  display: flex;
+  gap: 0.7rem;
+}
+.btn {
+  background: var(--bg-alt);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 1.3rem;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border 0.2s;
+}
+.btn-accent {
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+}
+.btn-accent:hover, .btn-accent:focus {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.btn:hover, .btn:focus {
+  background: #23262f;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Chat Demo Tab */
+.chat-window {
+  background: #181a20;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-height: 220px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  font-family: var(--font-mono);
+  color: #e5e7ef;
+  box-sizing: border-box;
+}
+.chat-input-row {
+  display: flex;
+  gap: 0.7rem;
+}
+.chat-input {
+  flex: 1;
+  background: var(--bg-alt);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.7rem 1.1rem;
+  font-size: 1rem;
+  font-family: var(--font-main);
+}
+
+/* Chat bubbles */
+.chat-msg {
+  display: block;
+  margin-bottom: 0.7rem;
+  padding: 0.7rem 1.1rem;
+  border-radius: 1.2rem;
+  max-width: 70%;
+  word-break: break-word;
+  font-size: 1.05rem;
+}
+.chat-msg.user {
+  background: var(--accent);
+  color: #fff;
+  margin-left: auto;
+  text-align: right;
+}
+.chat-msg.bot {
+  background: #23262f;
+  color: var(--fg);
+  margin-right: auto;
+  text-align: left;
+}
+
+/* Model Converter Tab */
+.converter-controls {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1.2rem;
+}
+.file-input {
+  background: var(--bg-alt);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+}
+.converter-status {
+  color: var(--fg-muted);
+  margin-bottom: 1rem;
+  min-height: 1.2em;
+}
+.download-link {
+  display: inline-block;
+  background: var(--accent);
+  color: #fff;
+  border-radius: var(--radius);
+  padding: 0.6rem 1.3rem;
+  text-decoration: none;
+  font-weight: 500;
+  margin-top: 0.5rem;
+  transition: background 0.2s;
+}
+.download-link:hover {
+  background: var(--accent-hover);
+}
+
+@media (max-width: 700px) {
+  .container {
+    padding: 1rem 0.5rem;
+    min-height: 90vh;
+  }
+  .tab-content {
+    padding: 1rem 0.5rem;
+    min-height: 250px;
+  }
+  .main-title {
+    font-size: 1.3rem;
+  }
+  .test-buttons-grid {
+    grid-template-columns: 1fr 1fr;
+    padding: 0.7rem 0.3rem 0.7rem 0.3rem;
+  }
+}
+
 body {
     font-family: Arial, sans-serif;
     margin: 2em;

@@ -3,15 +3,55 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BitNet WASM Demo</title>
+    <title>BitNet WASM</title>
     <link rel="stylesheet" href="style.css">
 </head>
-<body>
-    <h1>BitNet WASM Web Demo</h1>
-    <textarea id="output-area" rows="10" cols="80" placeholder="Output will appear here..."></textarea>
-    <button id="hello-btn">Say Hello from Rust!</button>
-    <div id="hello-output"></div>
-    <!-- TODO: Add prompt input, buttons, and streaming output UI -->
+<body class="dark-bg">
+    <div class="container">
+        <h1 class="main-title">BitNet WASM</h1>
+        <div class="tabs">
+            <button class="tab-btn active" id="tab-test">Test Suits</button>
+            <button class="tab-btn" id="tab-chat">BitNet Chat Demo</button>
+            <button class="tab-btn" id="tab-convert">Model Converter</button>
+        </div>
+        <div class="tab-content" id="tab-content-test">
+            <div id="test-buttons-grid" class="test-buttons-grid" aria-label="Test Buttons Grid">
+                <button id="test-ping-btn" class="btn">Test Ping</button>
+                <button class="btn">Test A</button>
+                <button class="btn">Test B</button>
+                <button class="btn">Test C</button>
+                <button class="btn">Test D</button>
+                <button class="btn">Test E</button>
+                <button class="btn">Test F</button>
+                <button class="btn">Test G</button>
+                <button class="btn">Test H</button>
+            </div>
+            <textarea id="output-area" class="console-area" rows="12" cols="80" readonly title="Test log output" placeholder="Test log output will appear here..."></textarea>
+            <div class="test-controls test-controls-bottom">
+                <button id="generate-report-btn" class="btn btn-accent">Generate Report</button>
+            </div>
+        </div>
+        <div class="tab-content hidden" id="tab-content-chat">
+            <div class="section-label">BitNet Chat Demo</div>
+            <div class="chat-window" id="chat-window">
+                <!-- Chat messages will appear here -->
+            </div>
+            <div class="chat-input-row">
+                <input type="text" id="chat-input" class="chat-input" placeholder="Type your message..." />
+                <button id="chat-send-btn" class="btn btn-accent">Send</button>
+            </div>
+        </div>
+        <div class="tab-content hidden" id="tab-content-convert">
+            <div class="section-label">Model Converter</div>
+            <div class="converter-controls">
+                <label for="model-upload" class="visually-hidden">Upload Model Files</label>
+                <input type="file" id="model-upload" class="file-input" multiple title="Upload model files for conversion" placeholder="Choose model files..." />
+                <button id="convert-btn" class="btn btn-accent">Convert</button>
+            </div>
+            <div class="converter-status" id="converter-status"></div>
+            <a id="download-link" class="download-link hidden" href="#" download>Download Converted Model</a>
+        </div>
+    </div>
     <script type="module" src="main.js"></script>
 </body>
 </html> 

@@ -14,10 +14,6 @@ wgpu = { version = "25.0.2", default-features = false, features = ["wgsl", "webg
 js-sys = "0.3.69"
 console_error_panic_hook = "0.1.7"
 futures-intrusive = { version = "0.5.0", default-features = false }
-# [reqwest] REMOVED: Not compatible with WASM/browser in 0.12.x. Use JavaScript fetch and pass data to Rust via wasm-bindgen or web-sys.
-# [hf-hub] REMOVED: Not compatible with WASM/browser. See https://github.com/huggingface/hf-hub/issues/45
-# For browser model/data loading, use JavaScript fetch and pass data to Rust via wasm-bindgen.
-tiny_http = "0.12.0"
 
 [dependencies.web-sys]
 version = "0.3.69"
@@ -34,4 +30,6 @@ tokio = { version = "1.37", features = ["full"] }
 tokio-tungstenite = "0.27.0"
 futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1" 
+serde_json = "1.0"
+warp = "0.3"
+mime_guess = "2.0" 

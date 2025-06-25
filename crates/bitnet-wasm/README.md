@@ -357,7 +357,7 @@ Enable seamless back-and-forth between your code, browser, and AI assistant (Cur
 - [x] **WASM/JS integration:** Minimal WASM export (`hello()`), called from JS and displayed in the browser.
 - [x] **One-command dev script:** Script or Rust tool to run `wasm-pack build`, start the server, and open the browser automatically.  
     _Now provided via `make wasm-dev` (start) and `make wasm-stop` (stop) from the project root._
-- [ ] **Log bridge:** JS sends logs/errors to the Rust server (via WebSocket or HTTP POST), which prints them in the console.
+- [x] **Log bridge:** JS sends logs/errors to the Rust server (via WebSocket or HTTP POST), which prints them in the console.
 - [ ] **MCP protocol draft:** Document a simple JSON protocol for logs/events/feedback between browser and server/editor.
 - [ ] **Editor/AI integration:** Enable Cursor or VS Code to monitor logs/events and provide context-aware suggestions or automation.
 - [ ] **Live reload (optional):** Auto-reload browser on file changes for rapid iteration.
@@ -371,8 +371,66 @@ Enable seamless back-and-forth between your code, browser, and AI assistant (Cur
 
 ---
 
-<!--
-## Demo
+## Design Philosophy: Separation of Concerns
 
-![Screenshot or GIF of BitNet WASM web demo](static/screenshot.png)
--->
+BitNet WASM is designed to be both a clean, portable inference library for downstream application developers **and** a powerful, developer-friendly environment for contributors and advanced users.
+
+### How the Crate is Structured
+
+- **WASM Core** (`bitnet-wasm`):
+  - Provides model loading, inference, and (optionally) test execution APIs for the browser and other WASM runtimes.
+  - Contains **no server-side logic, no WebSocket server, and no Markdown reporting**—it is pure, portable, and suitable for embedding in any web app.
+
+- **Dev/Demo Server** (`src/bin/server.rs`):
+  - A local Rust server for development and demonstration purposes.
+  - Serves static files, provides a WebSocket log/test bridge, and integrates with `TestReporter` to generate Markdown reports from browser-side logs and tests.
+  - **Not required** for downstream users, but invaluable for contributors and advanced debugging.
+
+- **Downstream Application Developers:**
+  - Use the WASM package and JS glue for inference and (optionally) browser-side tests.
+  - Do **not** need the dev server, WebSocket bridge, or Markdown reporting unless they want to use the enhanced dev workflow.
+
+### Summary Table
+
+| Component         | Model Inference | Testing | WebSocket Log Bridge | Markdown Reporting | File I/O |
+|-------------------|-----------------|---------|----------------------|--------------------|----------|
+| WASM Core         | ✅              | ✅      | ❌                   | ❌                 | ❌       |
+| Dev/Demo Server   | ❌              | ❌      | ✅                   | ✅                 | ✅       |
+| Downstream Apps   | ✅              | (opt)   | (opt, if wanted)     | ❌                 | ❌       |
+
+**Bottom Line:**
+
+- The WASM core is pure and portable.
+- The dev server adds powerful tools for contributors.
+- Downstream users can use the WASM core as-is, or adopt the dev workflow if desired.
+
+---
+
+## New Modern Web UI & Workflow (2025)
+
+BitNet WASM now features a modern, dark, tabbed web UI for rapid development, testing, and demoing BitNet in the browser:
+
+- **Tabbed Interface:**
+  - **Test Suits:** Run tests, view logs in a console, and generate Markdown reports with a single click.
+  - **BitNet Chat Demo:** Chat-style interface for interactive model inference (WIP).
+  - **Model Converter:** Upload and convert models (e.g., Llama/HF) to BitNet format (WIP).
+- **Live Log Bridge:**
+  - All browser logs (via `console.log`) are sent in real time to the Rust server via a persistent WebSocket connection.
+  - Logs appear in both the browser console area and the Rust server terminal.
+- **Markdown Reporting:**
+  - Click **Generate Report** to create a beautiful Markdown test report (`logs/browser_test.md`) from your browser session.
+  - Reports are generated using the same `TestReporter` utility as native Rust tests.
+- **Responsive, Accessible, and Developer-Friendly:**
+  - Modern dark theme, grid layout for test buttons, scrollable areas, and clear feedback for all actions.
+
+### Example Workflow
+
+1. Start the dev server (`make wasm-dev` or via the provided script).
+2. Open the web UI (auto-opens in browser).
+3. Click **Test Ping** or other test buttons to run tests and see logs in the console.
+4. Click **Generate Report** to save a Markdown report of your session.
+5. Check the `logs/` directory for the generated `.md` file.
+
+### UI Screenshot
+
+![BitNet WASM Web UI Screenshot](Screenshot.png)

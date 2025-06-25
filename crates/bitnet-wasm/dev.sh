@@ -54,10 +54,26 @@ if [ "$PORT_IN_USE" = false ]; then
     printf '\n[dev.sh] Starting Rust static file server on port %s...\n' "$SERVER_PORT"
     cargo run --bin server &
     SERVER_PID=$!
-    sleep 1
+    # Poll for server readiness
+    printf '[dev.sh] Waiting for server to be ready'
+    for i in {1..30}; do
+        if command -v curl > /dev/null; then
+            if curl --output /dev/null --silent --head --fail "http://localhost:$SERVER_PORT"; then
+                printf '\n[dev.sh] Server is up!\n'
+                break
+            fi
+        else
+            # Fallback: just sleep a bit
+            sleep 1
+            break
+        fi
+        printf '.'
+        sleep 1
+    done
 else
     printf '\n[dev.sh] Server already running on port %s.\n' "$SERVER_PORT"
     echo "[dev.sh] To stop it,  use: make wasm-stop"
+    SERVER_PID=""
 fi
 
 # 3. Open the browser (cross-platform, prefer Chrome on Windows)
@@ -90,7 +106,9 @@ else
 fi
 
 # 4. Print instructions for stopping the server
-printf '\n[dev.sh] Server running in background (PID %s). To stop: kill %s\n' "$SERVER_PID" "$SERVER_PID"
+if [ -n "$SERVER_PID" ]; then
+    printf '\n[dev.sh] Server running in background (PID %s). To stop: kill %s\n' "$SERVER_PID" "$SERVER_PID"
+fi
 
 # 5. Wait for server process to exit (optional: comment out if you want script to exit immediately)
 # wait $SERVER_PID 
