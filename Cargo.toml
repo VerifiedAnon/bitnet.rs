@@ -5,7 +5,8 @@ members = [
     "crates/bitnet-core",
     "crates/bitnet-converter",
     "crates/bitnet-tools",
-    "crates/bitnet-tools/gui_combiner"
+    "crates/bitnet-tools/gui_combiner",
+    "crates/bitnet-wasm"
 ]
 edition = "2021"
 

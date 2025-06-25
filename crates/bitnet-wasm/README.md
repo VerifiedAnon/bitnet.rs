@@ -1,0 +1,378 @@
+# BitNet WASM (`bitnet-wasm`)
+
+> **🌐 Run BitNet LLMs in your browser — WASM bindings, WebGPU acceleration, and JS interop for blazing-fast, portable inference.**
+
+---
+
+![WASM](https://img.shields.io/badge/WASM-browser-blueviolet)
+![Rust 2021](https://img.shields.io/badge/Rust-2021-orange)
+![License](https://img.shields.io/badge/License-Apache%202.0-blue)
+
+---
+
+## Overview
+
+BitNet WASM brings the power of the BitNet LLM architecture to the browser and other WebAssembly environments. It provides a high-level API bridge between the high-performance Rust core (`bitnet-core`) and JavaScript, leveraging WebGPU for hardware-accelerated inference.
+
+### Purpose
+
+- Run BitNet inference entirely in the browser (Chrome, Firefox, Edge, Safari)
+- Enable interactive, zero-latency web demos and applications
+- Provide a robust foundation for future web-based GUIs and research tools
+
+### Architecture
+
+- The `bitnet-wasm` crate acts as a library, exposing a JS-friendly API via `wasm-bindgen`.
+- It reuses the entire compute engine from `bitnet-core`.
+- A small, optional binary (server) is included for easy local development and testing.
+
+---
+
+## Features
+
+- 🌐 **WebAssembly (WASM) Target:** Run BitNet natively in browsers and other WASM runtimes (e.g., Deno, Wasmer)
+- 🚀 **WebGPU Acceleration:** Leverage modern GPU hardware for inference directly from the browser via `wgpu`
+- 🔗 **High-Level JS/TS API:** A clean, async/await-based API for easy JavaScript/TypeScript integration using `wasm-bindgen`
+- 📦 **Modular Design:** Reuses all validated logic from the `bitnet-core` workspace crate
+- 🚚 **Built-in Dev Server:** A simple, pure-Rust static file server to get demos running instantly with no external dependencies like Node.js or Python
+- 🔄 **Streaming Generation:** Supports token-by-token streaming to the UI for a responsive, real-time user experience
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Project Structure](#project-structure)
+- [Quick Start](#quick-start)
+- [Build Instructions](#build-instructions)
+- [API Design & Usage](#api-design--usage)
+- [Testing Strategy](#testing-strategy)
+- [Known Issues & Limitations](#known-issues--limitations)
+- [Development Checklist](#development-checklist)
+- [References](#references)
+- [Developer Automation & Workflow Vision](#developer-automation--workflow-vision)
+
+---
+
+## Project Structure
+
+```text
+bitnet-rs/
+└── crates/
+    └── bitnet-wasm/
+        ├── static/                # Static assets for the demo web page
+        │   ├── index.html
+        │   ├── style.css
+        │   └── main.js
+        ├── src/
+        │   ├── bin/
+        │   │   └── server.rs      # Source for the Rust static file server binary
+        │   ├── lib.rs             # The main WASM library entry point
+        │   ├── utils.rs           # Utility functions (e.g., error handling)
+        │   └── api.rs             # The core BitNetWasm struct and its public API
+        └── Cargo.toml
+```
+
+---
+
+## Quick Start
+
+> **Note:** Requires a recent Rust toolchain and [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/).
+
+```sh
+# 1. Install wasm-pack (if not already installed)
+cargo install wasm-pack
+
+# 2. Navigate to the wasm crate
+cd crates/bitnet-wasm
+
+# 3. Build the WASM package for the web
+# This compiles the Rust lib to WASM and places it in the `static/pkg` directory.
+wasm-pack build --target web --out-dir ./static/pkg --out-name bitnet_wasm
+
+# 4. Start the development server from the crate's root
+cargo run --bin server
+
+# 5. Open your browser to http://localhost:8080 and check the console.
+```
+
+---
+
+## Build Instructions
+
+1. **Install Prerequisites:**
+   - [Rust](https://rustup.rs/)
+   - [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/)
+
+2. **Build the WASM Library:**
+   - From within the `crates/bitnet-wasm` directory, run:
+
+     ```sh
+     # Clean build for production
+     wasm-pack build --target web --out-dir ./static/pkg --out-name bitnet_wasm
+
+     # Development build with debug symbols
+     wasm-pack build --dev --target web --out-dir ./static/pkg --out-name bitnet_wasm
+     ```
+
+3. **Serve the WASM and web assets:**
+   - Run the dev server (default port: **8080**):
+
+     ```sh
+     
+     cargo run --bin server
+     # Or specify a directory: cargo run --bin server -- static/
+     ```
+
+---
+
+## API Design & Usage
+
+### Rust API (`src/api.rs`)
+
+```rust
+use wasm_bindgen::prelude::*;
+use bitnet_core::model::Transformer;
+use js_sys::Function;
+
+#[wasm_bindgen]
+pub struct BitNetWasm {
+    model: Transformer,
+}
+
+#[wasm_bindgen]
+impl BitNetWasm {
+    /// Creates a new, empty BitNet instance.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        // ... initialization logic ...
+        Self { /* ... */ }
+    }
+
+    /// Loads a model and tokenizer from a URL.
+    pub async fn load_model(&mut self, model_url: String) -> Result<(), JsValue> {
+        // ... fetch and deserialize model ...
+        Ok(())
+    }
+
+    /// Generates text token-by-token, streaming results to a JS callback.
+    pub async fn generate(
+        &self,
+        prompt: String,
+        max_tokens: usize,
+        on_token_stream: &Function,
+    ) -> Result<(), JsValue> {
+        // ... generation loop ...
+        Ok(())
+    }
+}
+```
+
+### JavaScript Usage (`static/main.js`)
+
+```js
+import init, { BitNetWasm } from './pkg/bitnet_wasm.js';
+
+async function main() {
+    await init();
+    const bitnet = new BitNetWasm();
+    await bitnet.load_model('/models/bitnet_1.58b.gguf');
+    const handleNewToken = (token) => {
+        document.getElementById('output-area').value += token;
+    };
+    const prompt = "The definition of insanity is";
+    document.getElementById('output-area').value = prompt;
+    await bitnet.generate(prompt, 100, handleNewToken);
+}
+main().catch(console.error);
+```
+
+---
+
+## Testing Strategy
+
+- **Rust Unit Tests:**
+  - Use standard `#[test]` for all non-WASM, non-wgpu logic within the crate.
+- **Manual Browser Testing:**
+  - Run `wasm-pack build`, start the server, and open `http://localhost:8080` in a browser.
+  - Check the browser's Developer Console (F12) for logs and error messages from both JavaScript and Rust (`console::log!`).
+- **Automated Browser Testing (CI):**
+  - Use `wasm-pack test --headless --chrome --firefox` to run `#[wasm_bindgen_test]` functions in a headless browser.
+  - (Planned) Add a GitHub Actions workflow to run browser tests on PRs.
+
+---
+
+## Known Issues & Limitations
+
+- **WebGPU Support:** Requires a modern browser with WebGPU enabled. See [caniuse.com/webgpu](https://caniuse.com/webgpu) for compatibility. A graceful fallback or error message should be implemented for unsupported browsers.
+- **Model Loading & Caching:** Fetching large model files on every page load is inefficient. The demo should leverage the browser's Cache API via `web-sys` to store the model locally after the first download.
+- **Memory Limits:** Browsers impose memory limits on tabs, which may restrict the maximum size of models that can be loaded client-side.
+- **Single-Threaded WASM:** Standard WASM runs on the browser's main thread. For a non-blocking UI, all heavy computation (like model loading and inference loops) must be async and use yield points to avoid freezing the page. Web Workers can be used for true parallelism in the future.
+- **File Serving:** The dev server is for local development only. For production, use a proper static file host.
+
+> **Tip:** If you encounter issues, check the browser console for errors and ensure WebGPU is enabled.
+
+---
+
+## Development Checklist
+
+- [x] Crate setup & configuration (`bitnet-wasm` created, Cargo.toml, dependencies)
+- [x] Core API implementation (BitNetWasm struct, async methods, error handling)
+- [x] Development server (Rust static file server in `src/bin/server.rs`)
+- [x] Web demo (`static/index.html`, `main.js`, `style.css`)
+- [ ] Testing & CI (unit tests, browser tests, GitHub Actions)
+- [ ] Documentation (README, code comments, API docs)
+
+---
+
+## References
+
+- [wasm-bindgen Documentation](https://rustwasm.github.io/wasm-bindgen/)
+- [wgpu on WASM](https://github.com/gfx-rs/wgpu)
+- [MDN WebGPU API](https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API)
+- [BitNet-rs Main README](../../README.md)
+
+---
+
+## Developer Automation & Workflow Vision
+
+> **Goal:** Create a seamless, developer-friendly workflow for BitNet WASM development, browser integration, and future automation. This section documents our vision and step-by-step plan for automation, log capture, and editor/AI integration.
+
+### 1. One-Command Build, Serve, and Open
+
+**Goal:**
+Make it so you can build the WASM, start the server, and open the browser with a single command.
+
+**Options:**
+
+- **Shell Script (cross-platform):**
+
+  - Write a script (e.g., `dev.sh` for Unix, `dev.ps1` for Windows) that:
+    - Runs `wasm-pack build ...`
+    - Runs `cargo run --bin server` (possibly in the background)
+    - Opens the browser to `http://localhost:8080` (using `xdg-open`, `open`, or `start`)
+- **Rust-based Launcher:**
+  - Write a small Rust CLI tool (e.g., `dev.rs`) that does the above steps using `std::process::Command`.
+- **Cargo Make or Justfile:**
+  - Use [cargo-make](https://sagiegurari.github.io/cargo-make/) or [just](https://just.systems/) for a cross-platform task runner.
+
+**Recommendation:**
+Start with a shell script for simplicity, then consider a Rust launcher for full cross-platform support.
+
+---
+
+### 2. Capturing Browser Logs in Rust Console
+
+BitNet WASM: Browser Log Bridge & Unified Test Reporting
+
+=======================================================
+
+Vision:
+
+- Everything printed/logged in the browser (JS or WASM) is sent to the Rust server in real time via WebSocket.
+- The Rust server receives these logs, prints them to the console, and writes them to a Markdown `.md` file using the `TestReporter` utility from `bitnet-tools/src/test_utils.rs`.
+- The web UI has test buttons (e.g., "Run Kernel Test", "Run Model Test", etc.) that trigger browser-side tests, whose logs/results are sent back to the server.
+- You get the same beautiful Markdown reports for browser/WASM tests as you do for native Rust tests.
+
+How to Achieve This:
+
+1. WebSocket Log Bridge
+   - Server: Add WebSocket support to your Rust static server (e.g., using `tokio-tungstenite` or `ws` crate).
+   - Browser: In your JS, open a WebSocket connection to the server and override `console.log`, `console.error`, etc. to send logs over the socket.
+
+2. TestReporter Integration
+   - On the Rust side, for each test run (triggered from the browser), create a new `TestReporter` instance.
+   - As log messages come in over the WebSocket, feed them into `TestReporter` (as if they were Rust-side logs).
+   - When a test completes (browser sends a "done" message), call `generate_report()` to write the Markdown file.
+
+3. Web UI Test Buttons
+   - Each button triggers a specific test in JS (mirroring your Rust-side tests).
+   - Each test sends logs/results over the WebSocket as it runs.
+
+Example Flow:
+
+1. User clicks "Run Kernel Test" in browser.
+2. JS sends `{type: "start", test: "kernel"}` over WebSocket.
+3. JS runs the test, sending logs/errors as `{type: "log", level: "info", message: "..."}`.
+4. On completion, JS sends `{type: "done", test: "kernel"}`.
+5. Rust server collects logs, prints to console, and writes a Markdown report.
+
+Step-by-Step Implementation Plan:
+
+A. Add WebSocket Support to Your Rust Server
+
+- Replace or augment your current `tiny_http` server with a WebSocket-capable server (e.g., `tokio-tungstenite`).
+- Accept WebSocket connections at `/ws` or similar.
+- For each connection, receive log messages and print/store them.
+
+B. JS: Log Bridge
+
+- In `main.js`, open a WebSocket to `ws://localhost:8080/ws`.
+- Override `console.log`, `console.error`, etc. to send messages over the socket.
+- When a test is run, send a "start" message, then logs, then a "done" message.
+
+C. Rust: Integrate with TestReporter
+
+- For each test session, create a `TestReporter`.
+- As logs come in, call `log_message_simple`.
+- On "done", call `generate_report()` to write the `.md` file.
+
+D. Web UI: Test Buttons
+
+- Add buttons for each test (e.g., "Run Kernel Test").
+- Each button triggers a JS function that runs the test and logs output.
+
+// This plan is a living spec. Update as you implement and refine the workflow!
+
+
+### 4. VS Code/Cursor Integration and "MCP" (Model Context Protocol)
+
+**Goal:**
+Enable seamless back-and-forth between your code, browser, and AI assistant (Cursor), possibly automating feedback and log capture.Extending Capturing Browser Logs in Rust Console
+
+**Ideas:**
+
+- **Editor Integration:**
+
+  - Use VS Code tasks or launch configs to run your dev script/server and open the browser.
+  - Use the Cursor extension to monitor logs or trigger actions based on file changes or log output.
+- **MCP (Model Context Protocol):**
+  - Define a simple protocol (e.g., JSON over WebSocket or HTTP) for the browser to send logs, events, or even model outputs back to the server/editor.
+  - Cursor could monitor this channel and provide suggestions, error analysis, or even auto-patch code.
+- **Auto-Feedback Loop:**
+  - When a browser error or log is received, Cursor could automatically surface it in the editor, suggest fixes, or even open the relevant file/line.
+
+**Recommendation:**
+
+- Start by implementing a log bridge (see above).
+- Document a simple JSON protocol for logs/events.
+- As Cursor, I can monitor this log file or endpoint and use it to provide context-aware suggestions or debugging help.
+
+---
+
+### Step-by-Step Plan & Checklist
+
+- [x] **Static file server:** Serve `static/` on port 8080 with Rust (`src/bin/server.rs`).
+- [x] **WASM/JS integration:** Minimal WASM export (`hello()`), called from JS and displayed in the browser.
+- [x] **One-command dev script:** Script or Rust tool to run `wasm-pack build`, start the server, and open the browser automatically.  
+    _Now provided via `make wasm-dev` (start) and `make wasm-stop` (stop) from the project root._
+- [ ] **Log bridge:** JS sends logs/errors to the Rust server (via WebSocket or HTTP POST), which prints them in the console.
+- [ ] **MCP protocol draft:** Document a simple JSON protocol for logs/events/feedback between browser and server/editor.
+- [ ] **Editor/AI integration:** Enable Cursor or VS Code to monitor logs/events and provide context-aware suggestions or automation.
+- [ ] **Live reload (optional):** Auto-reload browser on file changes for rapid iteration.
+
+### Notes
+
+- Start with a shell script or Rust CLI for the one-command workflow; expand to more advanced automation as needed.
+- Log bridge can be simple (HTTP POST) or real-time (WebSocket).
+- MCP can evolve as the project grows; document as you go.
+- This section is a living plan—update as you make progress!
+
+---
+
+<!--
+## Demo
+
+![Screenshot or GIF of BitNet WASM web demo](static/screenshot.png)
+-->

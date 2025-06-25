@@ -45,29 +45,6 @@ fn decode_2bit(val: u32) -> i32 {
     }
 }
 
-// Unroll the decoding loop for maximum compatibility, while preserving
-// the LSB-to-MSB decoding order from the previously passing version.
-fn decode_16x2bit_ternary(packed_val: u32) -> array<i32, 16> {
-    var decoded: array<i32, 16>;
-    decoded[0]  = decode_2bit((packed_val >> 0u) & 0x3u);
-    decoded[1]  = decode_2bit((packed_val >> 2u) & 0x3u);
-    decoded[2]  = decode_2bit((packed_val >> 4u) & 0x3u);
-    decoded[3]  = decode_2bit((packed_val >> 6u) & 0x3u);
-    decoded[4]  = decode_2bit((packed_val >> 8u) & 0x3u);
-    decoded[5]  = decode_2bit((packed_val >> 10u) & 0x3u);
-    decoded[6]  = decode_2bit((packed_val >> 12u) & 0x3u);
-    decoded[7]  = decode_2bit((packed_val >> 14u) & 0x3u);
-    decoded[8]  = decode_2bit((packed_val >> 16u) & 0x3u);
-    decoded[9]  = decode_2bit((packed_val >> 18u) & 0x3u);
-    decoded[10] = decode_2bit((packed_val >> 20u) & 0x3u);
-    decoded[11] = decode_2bit((packed_val >> 22u) & 0x3u);
-    decoded[12] = decode_2bit((packed_val >> 24u) & 0x3u);
-    decoded[13] = decode_2bit((packed_val >> 26u) & 0x3u);
-    decoded[14] = decode_2bit((packed_val >> 28u) & 0x3u);
-    decoded[15] = decode_2bit((packed_val >> 30u) & 0x3u);
-    return decoded;
-}
-
 // Vectorized dot product for better throughput
 fn dot_product_4x4(a: vec4<i32>, b: vec4<i32>) -> i32 {
     return dot(a, b);
@@ -130,7 +107,7 @@ fn main(
             }
         }
         
-        // Load and decode weights
+        // Load and decode weights (per-element, inlined, no array returns)
         let total_b_elements = TILE_DIM_N * TILE_DIM_K;
         let loads_per_thread_b = (total_b_elements + 255u) / 256u;
         
@@ -147,43 +124,23 @@ fn main(
                     let weight_idx = global_n * metadata.K_packed + global_k_packed_idx;
                     let packed_w = packed_weights[weight_idx];
 
-                    // FIX 2: Inline the decoding logic. The Dx12 backend fails pipeline
-                    // creation when a function returns an array, as seen in the V4.2.2 test.
-                    var decoded: array<i32, 16>;
-                    decoded[0]  = decode_2bit((packed_w >> 0u) & 0x3u);
-                    decoded[1]  = decode_2bit((packed_w >> 2u) & 0x3u);
-                    decoded[2]  = decode_2bit((packed_w >> 4u) & 0x3u);
-                    decoded[3]  = decode_2bit((packed_w >> 6u) & 0x3u);
-                    decoded[4]  = decode_2bit((packed_w >> 8u) & 0x3u);
-                    decoded[5]  = decode_2bit((packed_w >> 10u) & 0x3u);
-                    decoded[6]  = decode_2bit((packed_w >> 12u) & 0x3u);
-                    decoded[7]  = decode_2bit((packed_w >> 14u) & 0x3u);
-                    decoded[8]  = decode_2bit((packed_w >> 16u) & 0x3u);
-                    decoded[9]  = decode_2bit((packed_w >> 18u) & 0x3u);
-                    decoded[10] = decode_2bit((packed_w >> 20u) & 0x3u);
-                    decoded[11] = decode_2bit((packed_w >> 22u) & 0x3u);
-                    decoded[12] = decode_2bit((packed_w >> 24u) & 0x3u);
-                    decoded[13] = decode_2bit((packed_w >> 26u) & 0x3u);
-                    decoded[14] = decode_2bit((packed_w >> 28u) & 0x3u);
-                    decoded[15] = decode_2bit((packed_w >> 30u) & 0x3u);
-
-                    // Store decoded weights (unrolled for WGSL compliance)
-                    tile_b[n * TILE_DIM_K + k + 0u] = decoded[0u];
-                    tile_b[n * TILE_DIM_K + k + 1u] = decoded[1u];
-                    tile_b[n * TILE_DIM_K + k + 2u] = decoded[2u];
-                    tile_b[n * TILE_DIM_K + k + 3u] = decoded[3u];
-                    tile_b[n * TILE_DIM_K + k + 4u] = decoded[4u];
-                    tile_b[n * TILE_DIM_K + k + 5u] = decoded[5u];
-                    tile_b[n * TILE_DIM_K + k + 6u] = decoded[6u];
-                    tile_b[n * TILE_DIM_K + k + 7u] = decoded[7u];
-                    tile_b[n * TILE_DIM_K + k + 8u] = decoded[8u];
-                    tile_b[n * TILE_DIM_K + k + 9u] = decoded[9u];
-                    tile_b[n * TILE_DIM_K + k + 10u] = decoded[10u];
-                    tile_b[n * TILE_DIM_K + k + 11u] = decoded[11u];
-                    tile_b[n * TILE_DIM_K + k + 12u] = decoded[12u];
-                    tile_b[n * TILE_DIM_K + k + 13u] = decoded[13u];
-                    tile_b[n * TILE_DIM_K + k + 14u] = decoded[14u];
-                    tile_b[n * TILE_DIM_K + k + 15u] = decoded[15u];
+                    // Per-element decode, inlined (no array returns)
+                    tile_b[n * TILE_DIM_K + k + 0u] = decode_2bit((packed_w >> 0u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 1u] = decode_2bit((packed_w >> 2u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 2u] = decode_2bit((packed_w >> 4u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 3u] = decode_2bit((packed_w >> 6u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 4u] = decode_2bit((packed_w >> 8u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 5u] = decode_2bit((packed_w >> 10u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 6u] = decode_2bit((packed_w >> 12u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 7u] = decode_2bit((packed_w >> 14u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 8u] = decode_2bit((packed_w >> 16u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 9u] = decode_2bit((packed_w >> 18u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 10u] = decode_2bit((packed_w >> 20u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 11u] = decode_2bit((packed_w >> 22u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 12u] = decode_2bit((packed_w >> 24u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 13u] = decode_2bit((packed_w >> 26u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 14u] = decode_2bit((packed_w >> 28u) & 0x3u);
+                    tile_b[n * TILE_DIM_K + k + 15u] = decode_2bit((packed_w >> 30u) & 0x3u);
                 } else {
                     // Pad with zeros
                     for (var j = 0u; j < 16u; j = j + 1u) {
