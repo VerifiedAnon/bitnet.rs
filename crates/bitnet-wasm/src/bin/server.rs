@@ -1,3 +1,4 @@
+#![cfg(not(target_arch = "wasm32"))]
 //! BitNet WASM dev/demo server using warp (serves static files + WebSocket log bridge)
 
 use std::convert::Infallible;
@@ -11,6 +12,57 @@ use warp::ws::{Message, WebSocket};
 use futures_util::{StreamExt, SinkExt};
 use serde_json::Value;
 use bitnet_tools::test_utils::TestReporter;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct TestResult {
+    test: String,
+    status: String,
+    time_ms: f64,
+    error: Option<String>,
+    logs: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct TestReportMsg {
+    #[serde(rename = "type")]
+    msg_type: String,
+    results: Vec<TestResult>,
+    logs: Vec<String>,
+}
+
+fn handle_test_report(msg: &str) {
+    let report: TestReportMsg = serde_json::from_str(msg).unwrap();
+    // Use TestReporter for consistent reporting
+    let reporter = match bitnet_tools::test_utils::TestReporter::new("browser_test") {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[BrowserLog] Failed to create TestReporter: {}", e);
+            return;
+        }
+    };
+    for result in &report.results {
+        // Log each test result
+        let test_name = &result.test;
+        let duration = std::time::Duration::from_millis(result.time_ms as u64);
+        if result.status == "pass" {
+            reporter.record_timing(test_name, duration);
+        } else {
+            let err = result.error.as_deref().unwrap_or("Test failed");
+            reporter.record_failure(test_name, err, Some(duration));
+        }
+        // Log per-test logs if present
+        for log in &result.logs {
+            reporter.log_message_simple(log);
+        }
+    }
+    // Log any global logs
+    for log in &report.logs {
+        reporter.log_message_simple(log);
+    }
+    reporter.generate_report();
+    println!("[BrowserLog] Markdown report generated for browser tests (TestReporter). Report includes summary, table, and logs.");
+}
 
 #[tokio::main]
 async fn main() {
@@ -81,7 +133,20 @@ async fn handle_ws(ws: WebSocket, reporter: Arc<Mutex<Option<TestReporter>>>) {
                 if msg.is_text() {
                     let txt = msg.to_str().unwrap_or("");
                     println!("[BrowserLog] {}", txt);
-                    if let Ok(val) = serde_json::from_str::<Value>(txt) {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(txt) {
+                        // Handle new test_report message
+                        if val.get("type").and_then(|t| t.as_str()) == Some("test_report") {
+                            // Print summary to console
+                            if let (Some(results), Some(logs)) = (val.get("results"), val.get("logs")) {
+                                if let Some(arr) = results.as_array() {
+                                    let test_names: Vec<_> = arr.iter().filter_map(|r| r.get("test")).filter_map(|t| t.as_str()).collect();
+                                    println!("[BrowserLog] Received test_report: {} tests: {}", arr.len(), test_names.join(", "));
+                                }
+                            }
+                            handle_test_report(txt);
+                            println!("[BrowserLog] Markdown report generated for browser tests.");
+                            continue;
+                        }
                         // If this is a 'start' message, update test_name and reporter
                         if val.get("type").and_then(|t| t.as_str()) == Some("start") {
                             if let Some(tname) = val.get("test").and_then(|t| t.as_str()) {

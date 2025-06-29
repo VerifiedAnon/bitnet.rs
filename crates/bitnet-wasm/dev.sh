@@ -6,6 +6,44 @@ WASM_OUT_DIR="./static/pkg"
 WASM_OUT_NAME="bitnet_wasm"
 SERVER_PORT=8080
 
+# --- HELP COMMAND ---
+if [[ "$1" == "help" || "$1" == "-h" || "$1" == "--help" ]]; then
+    echo "Usage: ./dev.sh [stop|help]"
+    echo
+    echo "  (no args)   Build, serve, and open BitNet WASM dev server."
+    echo "  stop        Stop the dev server running on port $SERVER_PORT."
+    echo "  help        Show this help message."
+    exit 0
+fi
+
+# --- STOP COMMAND ---
+if [[ "$1" == "stop" ]]; then
+    # Detect OS
+    OS="$(uname -s 2>/dev/null || echo Unknown)"
+    if [[ "$OS" == MINGW* || "$OS" == CYGWIN* || "$OS" == MSYS* || "$OS" == Windows* || "$OS" == Unknown ]]; then
+        echo "[dev.sh] Detected Windows. Searching for process on port $SERVER_PORT..."
+        PID=$(netstat -ano 2>/dev/null | grep :$SERVER_PORT | grep LISTEN | awk '{print $5}' | head -n1)
+        if [ -z "$PID" ]; then
+            echo "[dev.sh] No process found listening on port $SERVER_PORT."
+            exit 0
+        fi
+        echo "[dev.sh] Killing process with PID $PID..."
+        taskkill //PID $PID //F
+        echo "[dev.sh] Done."
+    else
+        echo "[dev.sh] Detected Unix-like OS. Searching for process on port $SERVER_PORT..."
+        PID=$(lsof -ti tcp:$SERVER_PORT)
+        if [ -z "$PID" ]; then
+            echo "[dev.sh] No process found listening on port $SERVER_PORT."
+            exit 0
+        fi
+        echo "[dev.sh] Killing process with PID $PID..."
+        kill -9 $PID
+        echo "[dev.sh] Done."
+    fi
+    exit 0
+fi
+
 # Check for cargo
 if ! command -v cargo > /dev/null; then
     echo "[dev.sh] WARNING: cargo not found in PATH. Rust toolchain is required."
@@ -52,7 +90,7 @@ fi
 if [ "$PORT_IN_USE" = false ]; then
     # 2. Start the Rust server in the background
     printf '\n[dev.sh] Starting Rust static file server on port %s...\n' "$SERVER_PORT"
-    cargo run --bin server &
+    cargo run --bin server --features dev-server &
     SERVER_PID=$!
     # Poll for server readiness
     printf '[dev.sh] Waiting for server to be ready'

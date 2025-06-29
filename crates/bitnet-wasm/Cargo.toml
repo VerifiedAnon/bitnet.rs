@@ -6,6 +6,18 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[[test]]
+name = "basic_wasm_test"
+path = "tests/basic_wasm_test.rs"
+
+[features]
+dev-server = []
+
+[[bin]]
+name = "server"
+path = "src/bin/server.rs"
+required-features = ["dev-server"]
+
 [dependencies]
 bitnet-core = { path = "../bitnet-core", default-features = false, optional = true }
 wasm-bindgen = "0.2.92"
@@ -19,6 +31,8 @@ futures-intrusive = { version = "0.5.0", default-features = false }
 version = "0.3.69"
 features = [
   "console",
+  "Window",
+  "Performance",
 ]
 
 [dev-dependencies]

@@ -2,7 +2,7 @@ wasm-dev:
 	cd crates/bitnet-wasm && bash dev.sh
 
 wasm-stop:
-	cd crates/bitnet-wasm && bash stop.sh
+	cd crates/bitnet-wasm && bash dev.sh stop
 
 help:
 	@echo "Available targets:"
