@@ -90,6 +90,13 @@ use bitnet_core::model::Transformer;
     RUN_STRESS_TESTS=1 cargo test --package bitnet-core --test kernel_tests -- --nocapture
     ```
 
+### Test Results Summary
+
+- All GPU kernels (both SAFE and OPTIMAL variants) are validated for correctness against the scalar CPU reference implementation.
+- Large batch benchmarks show a **~15x speedup** for GPU inference over CPU for typical matrix sizes (e.g., 2048x1024x1024), with both SAFE and OPTIMAL kernels performing similarly on tested hardware.
+- All tests (correctness, performance, memory safety, and cross-device consistency) pass on major backends (Vulkan, DX12, OpenGL).
+- For detailed results and timing breakdowns, see [`logs/kernel_tests.md`](../../logs/kernel_tests.md).
+
 ## Implementation Notes
 
 - See the project plan for architecture and validation strategies
