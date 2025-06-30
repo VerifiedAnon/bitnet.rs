@@ -82,10 +82,15 @@ use bitnet_core::model::Transformer;
 - Streaming and per-block model loading tests
 - **Optional Stress Test**: A long-running stress test (`stress_test_maximum_dimension_support`) is available but ignored by default. To run it, set the `RUN_STRESS_TESTS` environment variable:
   - **PowerShell**:
+  
     ```powershell
+
     $env:RUN_STRESS_TESTS="1"; cargo test --package bitnet-core --test kernel_tests -- --nocapture
+
     ```
+
   - **Linux/macOS**:
+
     ```bash
     RUN_STRESS_TESTS=1 cargo test --package bitnet-core --test kernel_tests -- --nocapture
     ```

@@ -318,3 +318,186 @@ pub async fn test_ping_gpu_info() -> Result<JsValue, JsValue> {
         limits.max_buffer_size,
     )))
 }
+
+// --- Scalar reference logic for WASM tests (single-threaded, WASM-safe) ---
+fn quantize_activations_scalar(activations: &[f32]) -> (Vec<i8>, f32) {
+    let abs_max = activations
+        .iter()
+        .filter(|v| v.is_finite())
+        .map(|&x| x.abs())
+        .fold(f32::NEG_INFINITY, f32::max);
+    let abs_max = if abs_max == f32::NEG_INFINITY { 0.0 } else { abs_max };
+    let scale = abs_max / 127.0 + 1e-6;
+    (
+        activations
+            .iter()
+            .map(|&x| (x / scale).round().clamp(-127.0, 127.0) as i8)
+            .collect(),
+        scale,
+    )
+}
+
+fn matmul_quantized_scalar(
+    q_activations: &[i8],
+    packed_weights: &[u32],
+    activation_scales: &[f32],
+    weight_scales: &[f32],
+    batch_size: usize,
+    in_features: usize,
+    out_features: usize,
+) -> Vec<f32> {
+    let mut output = vec![0.0; batch_size * out_features];
+    let k_packed = in_features / 16;
+    for batch_idx in 0..batch_size {
+        let activation_scale = activation_scales[batch_idx];
+        let activations_start = batch_idx * in_features;
+        for out_idx in 0..out_features {
+            let mut sum = 0i32;
+            let weight_scale = weight_scales[out_idx];
+            let weights_start = out_idx * k_packed;
+            for k_idx in 0..k_packed {
+                let packed_weight = packed_weights[weights_start + k_idx];
+                let act_base = activations_start + k_idx * 16;
+                for bit_idx in 0..16 {
+                    let packed_bits = (packed_weight >> (bit_idx * 2)) & 0b11;
+                    let weight_val = match packed_bits {
+                        1 => 1i8,   // 01
+                        2 => -1i8,  // 10
+                        _ => 0i8,   // 00 or 11
+                    };
+                    sum += (q_activations[act_base + bit_idx] as i32) * (weight_val as i32);
+                }
+            }
+            output[batch_idx * out_features + out_idx] = (sum as f32) * activation_scale * weight_scale;
+        }
+    }
+    output
+}
+
+fn assert_vec_eq(a: &[f32], b: &[f32], tolerance: f32) {
+    assert_eq!(a.len(), b.len(), "Vector lengths don't match");
+    for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
+        if x.is_infinite() && y.is_infinite() && x.signum() == y.signum() {
+            continue;
+        }
+        if x.is_nan() && y.is_nan() {
+            continue;
+        }
+        assert!(
+            (x - y).abs() < tolerance,
+            "Vectors differ at index {}: {} != {} (diff = {})",
+            i,
+            x,
+            y,
+            (x - y).abs()
+        );
+    }
+}
+
+// === WASM Kernel Test Suite: Cold Tests ===
+
+pub async fn unit_test_pack_ternary_weights() -> Result<JsValue, JsValue> {
+    use bitnet_core::kernels::pack_ternary_weights;
+    let weights = vec![vec![-1i8, 0, 1, -1, 0, 1, -1, 0, 1, -1, 0, 1, -1, 0, 1, -1]];
+    let (packed, _scales) = pack_ternary_weights(&weights)
+        .map_err(|e| JsValue::from_str(&format!("Packing error: {:?}", e)))?;
+    let expected = 0b00011000011000011000011000011000u32;
+    if packed[0] != expected {
+        let msg = format!(
+            "Packing logic is incorrect: got {:032b}, expected {:032b}",
+            packed[0], expected
+        );
+        web_sys::console::error_1(&msg.clone().into());
+        return Err(JsValue::from_str(&msg));
+    }
+    web_sys::console::log_1(&"unit_test_pack_ternary_weights passed".into());
+    Ok(JsValue::from_str("unit_test_pack_ternary_weights passed"))
+}
+
+pub async fn unit_test_calculate_weight_scales() -> Result<JsValue, JsValue> {
+    use bitnet_core::kernels::calculate_weight_scales;
+    let weights = vec![
+        vec![-1i8, 0, 1],     // Average magnitude = 1.0 (sum=2, count=2)
+        vec![0, 0, 0],        // All zeros -> scale = 1.0
+        vec![1, 1, -1],       // Average magnitude = 1.0 (sum=3, count=3)
+        vec![-1, -1, 0],      // Average magnitude = 1.0 (sum=2, count=2)
+    ];
+    let scales = calculate_weight_scales(&weights);
+    let expected = vec![1.0, 1.0, 1.0, 1.0];
+    for (i, (s, e)) in scales.iter().zip(expected.iter()).enumerate() {
+        if (s - e).abs() > 1e-6 {
+            let msg = format!("Scale mismatch at {}: got {}, expected {}", i, s, e);
+            web_sys::console::error_1(&msg.clone().into());
+            return Err(JsValue::from_str(&msg));
+        }
+    }
+    web_sys::console::log_1(&"unit_test_calculate_weight_scales passed".into());
+    Ok(JsValue::from_str("unit_test_calculate_weight_scales passed"))
+}
+
+pub async fn test_scalar_packing_decoding_symmetry() -> Result<JsValue, JsValue> {
+    // 1. Define original weights
+    let original_weights: Vec<i8> = vec![-1, 0, 1, 0, 1, 1, 0, -1, -1, -1, 0, 0, 1, 1, 0, 1];
+    let weights_2d = vec![original_weights.clone()];
+    use bitnet_core::kernels::pack_ternary_weights;
+    let (packed, _scales) = pack_ternary_weights(&weights_2d)
+        .map_err(|e| JsValue::from_str(&format!("Packing error: {:?}", e)))?;
+    let packed_val = packed[0];
+    // 2. Decode the packed value using the correct logic (MSB to LSB)
+    let mut decoded_weights = Vec::with_capacity(16);
+    for i in 0..16 {
+        let bit_idx = 30 - (i * 2);
+        let bits = (packed_val >> bit_idx) & 0b11;
+        let weight = match bits {
+            0b00 => -1i8,
+            0b01 => 0i8,
+            0b10 => 1i8,
+            _ => return Err(JsValue::from_str("Invalid 2-bit value in decode")),
+        };
+        decoded_weights.push(weight);
+    }
+    if original_weights != decoded_weights {
+        let msg = format!(
+            "Packing/decoding not symmetrical!\nOriginal: {:?}\nDecoded:  {:?}",
+            original_weights, decoded_weights
+        );
+        web_sys::console::error_1(&msg.clone().into());
+        return Err(JsValue::from_str(&msg));
+    }
+    web_sys::console::log_1(&"test_scalar_packing_decoding_symmetry passed".into());
+    Ok(JsValue::from_str("test_scalar_packing_decoding_symmetry passed"))
+}
+
+pub async fn test_matmul_quantized_scalar() -> Result<JsValue, JsValue> {
+    // Test case with proper BitNet dimensions
+    let batch_size = 1;
+    let in_features = 16;
+    let out_features = 2;
+    // Simple test inputs
+    let q_activations = vec![1i8, -1, 0, 2, 1, -1, 0, 2, 1, -1, 0, 2, 1, -1, 0, 2];
+    let packed_weights = vec![
+        0b01001001010010010100100101001001,
+        0b01001001010010010100100101001001,
+    ];
+    let activation_scales = vec![0.5];
+    let weight_scales = vec![1.0, 1.0];
+    let output = matmul_quantized_scalar(
+        &q_activations,
+        &packed_weights,
+        &activation_scales,
+        &weight_scales,
+        batch_size,
+        in_features,
+        out_features,
+    );
+    let expected_output = vec![8.0, 8.0];
+    for (i, (o, e)) in output.iter().zip(expected_output.iter()).enumerate() {
+        if (o - e).abs() > 1e-5 {
+            let msg = format!("Output mismatch at {}: got {}, expected {}", i, o, e);
+            web_sys::console::error_1(&msg.clone().into());
+            return Err(JsValue::from_str(&msg));
+        }
+    }
+    web_sys::console::log_1(&"test_matmul_quantized_scalar passed".into());
+    Ok(JsValue::from_str("test_matmul_quantized_scalar passed"))
+}

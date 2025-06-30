@@ -295,8 +295,9 @@ impl BitLinear {
             label: Some("Bitnet Pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader,
-            entry_point: "main",
+            entry_point: Some("main"),
             compilation_options: Default::default(),
+            cache: None,
         });
 
         // Step 4: Create and submit command buffer

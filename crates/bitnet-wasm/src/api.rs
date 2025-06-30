@@ -98,5 +98,9 @@ export_tests!(
     run_test_inline_add_scalar_shader_compile,   
     test_ping_gpu_info,
     run_test_minimal_shader_compile,
+    unit_test_pack_ternary_weights,
+    unit_test_calculate_weight_scales,
+    test_scalar_packing_decoding_symmetry,
+    test_matmul_quantized_scalar,
 ); 
 

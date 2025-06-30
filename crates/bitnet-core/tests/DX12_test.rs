@@ -1916,18 +1916,18 @@ struct WarmGpuContext {
 
 impl WarmGpuContext {
     async fn new() -> Option<Self> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::DX12,
             ..Default::default()
         });
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions::default())
-            .await?;
+            .await.ok()?;
 
         let info = adapter.get_info();
         let (device, queue) = adapter // Capture queue here
-            .request_device(&wgpu::DeviceDescriptor::default(), None)
+            .request_device(&wgpu::DeviceDescriptor::default())
             .await
             .ok()?;
 
@@ -1958,7 +1958,7 @@ where
     }));
 
     let result = f();
-    device.poll(wgpu::Maintain::Wait);
+    device.poll(wgpu::MaintainBase::Wait);
     device.on_uncaptured_error(Box::new(|_| {})); // Reset handler
 
     let e = error.lock().unwrap().take();
@@ -2008,8 +2008,9 @@ async fn test_shader_compilation(name: &str, shader_source: &str, context: &Warm
             label: Some(&format!("{} compute pipeline", name)),
             layout: Some(&pipeline_layout),
             module: &shader_module,
-            entry_point: "main",
+            entry_point: Some("main"),
             compilation_options: Default::default(),
+            cache: None,
         })
     }).await;
     if let Some(e) = pipeline_error {
@@ -2150,8 +2151,9 @@ async fn test_correctness_on_dx12(context: &WarmGpuContext) {
             label: Some("Correctness Test Pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader_module,
-            entry_point: "main",
+            entry_point: Some("main"),
             compilation_options: Default::default(),
+            cache: None,
         })
     }).await;
 
@@ -2220,7 +2222,7 @@ async fn test_correctness_on_dx12(context: &WarmGpuContext) {
     let buffer_slice = staging_buffer.slice(..);
     let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
     buffer_slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
-    context.device.poll(wgpu::Maintain::Wait);
+    context.device.poll(wgpu::MaintainBase::Wait);
     rx.receive().await.unwrap().unwrap();
     let gpu_output: Vec<f32> = bytemuck::cast_slice(&buffer_slice.get_mapped_range()).to_vec();
     

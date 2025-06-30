@@ -61,7 +61,7 @@ impl WgpuContext {
                 compatible_surface: None,
             })
             .await
-            .ok_or(BitNetError::NoSuitableAdapter)?;
+            .map_err(|_| BitNetError::NoSuitableAdapter)?;
 
         let mut required_features = wgpu::Features::empty();
         if adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
@@ -74,8 +74,9 @@ impl WgpuContext {
                     label: Some("Bitnet Device"),
                     required_features,
                     required_limits: Default::default(),
-                },
-                None,
+                    memory_hints: wgpu::MemoryHints::default(),
+                    trace: wgpu::Trace::default(),
+                }
             )
             .await
             .map_err(BitNetError::RequestDeviceError)?;
@@ -103,7 +104,7 @@ impl WgpuContext {
                 compatible_surface: None,
             })
             .await
-            .ok_or(BitNetError::NoSuitableAdapter)?;
+            .map_err(|_| BitNetError::NoSuitableAdapter)?;
 
         let mut required_features = wgpu::Features::empty();
         if adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
@@ -116,8 +117,9 @@ impl WgpuContext {
                     label: Some("Custom Device"),
                     required_features,
                     required_limits: limits,
-                },
-                None,
+                    memory_hints: wgpu::MemoryHints::default(),
+                    trace: wgpu::Trace::default(),
+                }
             )
             .await
             .map_err(BitNetError::RequestDeviceError)?;

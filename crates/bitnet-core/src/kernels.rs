@@ -96,6 +96,11 @@ pub struct BitnetMetadata {
 ///    - +1 => 10 (binary 2)
 /// 2. Per-output-channel scaling factors
 ///
+/// # Packing Order (LSB-first)
+///
+/// The first weight goes into the lowest bits (bits 0-1), the next into bits 2-3, ..., the last (16th) into bits 30-31.
+/// This matches the GPU shader and converter logic.
+///
 /// # Arguments
 ///
 /// * `weights` - 2D array of ternary weights [out_features][in_features]
@@ -138,7 +143,7 @@ pub fn pack_ternary_weights(weights: &[Vec<i8>]) -> Result<(Vec<u32>, Vec<f32>),
         // Pack weights
         for (in_idx, &w) in row.iter().enumerate() {
             let pack_idx = in_idx / 16;
-            let bit_idx = 30 - ((in_idx % 16) * 2); // Start from MSB and work down
+            let bit_idx = (in_idx % 16) * 2; // LSB-first: first weight in bits 0-1
             
             // Map -1, 0, +1 to 2-bit values
             let bits = match w {
@@ -215,10 +220,11 @@ mod tests {
         assert_eq!(scales.len(), 2);
         assert!(scales.iter().all(|&s| s > 0.0));
         
-        // Verify first row packing
+        // Verify first row packing (LSB-first)
         // Input:  -1,  0,  1,  0, -1,  1,  0,  0,  1, -1,  0,  1,  0, -1,  1,  0
         // Bits:   00, 01, 10, 01, 00, 10, 01, 01, 10, 00, 01, 10, 01, 00, 10, 01
-        let expected = 0b00_01_10_01_00_10_01_01_10_00_01_10_01_00_10_01u32;
+        // LSB-first: first weight in bits 0-1, last in 30-31
+        let expected = 0b01_10_00_01_10_01_01_10_00_10_01_00_01_10_01_00u32;
         assert_eq!(packed[0], expected, "Packed weights don't match expected pattern.\nExpected: {:032b}\nGot:      {:032b}", expected, packed[0]);
         
         // Verify second row packing
@@ -263,5 +269,27 @@ mod tests {
             "Expected InvalidWeightValue error, but got {:?}", result
         );
         println!("[TEST] test_invalid_weight_value (took {:.2?})", t0.elapsed());
+    }
+
+    #[test]
+    fn test_packing_unpacking_symmetry() {
+        // This test ensures that packing and then unpacking using the shader/scalar logic is symmetric.
+        let original: Vec<i8> = vec![-1, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1, 0];
+        let weights = vec![original.clone()];
+        let (packed, _) = pack_ternary_weights(&weights).unwrap();
+        let packed_val = packed[0];
+        // Unpack using the same logic as the shader/scalar code (LSB-first)
+        let mut unpacked = Vec::with_capacity(16);
+        for i in 0..16 {
+            let bits = (packed_val >> (i * 2)) & 0b11;
+            let w = match bits {
+                0 => -1i8,
+                1 => 0i8,
+                2 => 1i8,
+                _ => 0i8, // Should never happen
+            };
+            unpacked.push(w);
+        }
+        assert_eq!(original, unpacked, "Packing and unpacking are not symmetric!\nOriginal: {:?}\nUnpacked: {:?}", original, unpacked);
     }
 }
