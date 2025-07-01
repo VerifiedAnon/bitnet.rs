@@ -12,6 +12,7 @@ A pure Rust, streaming-friendly core engine for BitNet models, focused on high-p
 - [How to Use](#how-to-use)
 - [Features](#features)
 - [Kernel & Quantization](#kernel--quantization)
+- [Attention, Quantization, and Kernel Design Rationale](#attention-quantization-and-kernel-design-rationale)
 - [Test Coverage](#test-coverage)
 - [Implementation Notes](#implementation-notes)
 
@@ -73,6 +74,41 @@ use bitnet_core::model::Transformer;
 - **Packing utilities**: See `src/kernels.rs` for pure Rust packing and scale calculation
 - **Quantization**: Scalar and SIMD quantization utilities for activations and weights
 - **Tested against scalar reference**: All kernels are validated against pure Rust reference implementations
+
+## Attention, Quantization, and Kernel Design Rationale
+
+BitNet uses a hybrid approach for kernel and quantization design, following the original BitNet paper and best practices for efficient transformer inference:
+
+### Summary Table
+
+| Operation                | Quantized (Ternary)? | Kernel Used                  |
+|--------------------------|----------------------|------------------------------|
+| Q/K/V Projections        | Yes                  | `bitnet_kernel.wgsl`         |
+| Output Projection        | Yes                  | `bitnet_kernel.wgsl`         |
+| Feed-Forward Layers      | Yes                  | `bitnet_kernel.wgsl`         |
+| Attention (softmax, etc) | No (f32)             | `bitnet_attention.wgsl`      |
+
+### Rationale
+
+- **Ternary Quantization for Linear Layers:**
+  - The BitNet paper applies ternary quantization (`{-1, 0, +1}`) only to the core matrix multiplications (all linear layers: Q/K/V projections, output projection, feed-forward layers).
+  - This is where most parameters and compute reside, so quantizing these gives the largest efficiency gain.
+  - Our `bitnet_kernel.wgsl` and `bitnet_kernel_optimal.wgsl` implement these quantized matmuls, validated against scalar references and used throughout the model.
+
+- **Full-Precision Attention Math:**
+  - The actual attention computation—softmax(QKᵀ)V with causal masking—is performed in full precision (f32), as in the BitNet paper.
+  - This is because the attention mechanism is sensitive to quantization errors, especially in the softmax and masking steps.
+  - Our `bitnet_attention.wgsl` kernel implements this operation, taking Q, K, V (already projected by quantized matmuls) and producing the attended output in f32.
+
+- **Testing Philosophy:**
+  - All kernels are validated against pure Rust scalar reference implementations.
+  - Dedicated tests exist for both quantized matmul and full-precision attention, ensuring correctness and cross-device consistency.
+
+- **Why This Design?**
+  - This hybrid approach maximizes efficiency (by quantizing the heavy matmuls) while preserving accuracy in the most sensitive part of the transformer (the attention softmax block).
+  - It matches the BitNet paper and is standard in high-performance transformer inference.
+
+For more details, see the code comments in each kernel and the test suite in `tests/`.
 
 ## Test Coverage
 

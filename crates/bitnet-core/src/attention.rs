@@ -117,13 +117,16 @@ impl AttentionConfig {
             out_features: kv_out_dim,
         });
         let o_proj = BitLinear::from_record(BitLinearRecord {
-            packed_weights: vec![0; (q_out_dim * head_dim + 15) / 16],
-            weight_scales: vec![1.0; head_dim],
+            packed_weights: vec![0; (self.hidden_size * q_out_dim + 15) / 16],
+            weight_scales: vec![1.0; self.hidden_size],
             in_features: q_out_dim,
-            out_features: head_dim,
+            out_features: self.hidden_size,
         });
         Attention {
-            q_proj, k_proj, v_proj, o_proj,
+            q_proj,
+            k_proj,
+            v_proj,
+            o_proj,
             rotary_emb: RotaryEmbedding::new(head_dim, self.max_seq_len),
             num_heads: self.num_heads,
             num_kv_heads: self.num_kv_heads,
@@ -143,15 +146,25 @@ pub struct KVCache {
     pub seq_len: usize,
 }
 
+/// Device selection for attention computation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Device to use for attention computation.
+pub enum AttentionDevice {
+    /// Use CPU for attention computation.
+    Cpu,
+    /// Use GPU for attention computation.
+    Gpu,
+}
+
 /// Multi-head attention layer for BitNet.
 #[derive(Clone)]
 pub struct Attention {
     /// Query projection
-    q_proj: BitLinear,
+    pub q_proj: BitLinear,
     /// Key projection
-    k_proj: BitLinear,
+    pub k_proj: BitLinear,
     /// Value projection
-    v_proj: BitLinear,
+    pub v_proj: BitLinear,
     /// Output projection
     o_proj: BitLinear,
     /// Rotary position embedding
@@ -186,27 +199,62 @@ impl Attention {
         }
     }
 
-    /// The forward pass, now with full CPU-based logic.
-    pub async fn forward(
+    /// Forward pass for multi-head attention.
+    ///
+    /// # Arguments
+    /// * `context` - WgpuContext for GPU ops
+    /// * `x` - Input tensor (flattened, shape: [batch_size, seq_len, hidden_size])
+    /// * `batch_size` - Number of batches
+    /// * `seq_len` - Sequence length
+    /// * `pos_offset` - Position offset for RoPE
+    /// * `cache` - Optional KVCache for autoregressive generation
+    /// * `device` - Select CPU or GPU attention computation
+    ///
+    /// # Returns
+    /// Output tensor (flattened, shape: [batch_size, seq_len, hidden_size])
+    pub async fn forward_modern(
         &mut self,
         context: &WgpuContext,
         x: &[f32],
+        batch_size: usize,
+        seq_len: usize,
+        pos_offset: usize,
+        cache: Option<&mut KVCache>,
+        device: AttentionDevice,
+    ) -> Vec<f32> {
+        assert_eq!(x.len(), batch_size * seq_len * self.q_proj.in_features, "Input shape mismatch");
+        match device {
+            AttentionDevice::Cpu => {
+                self.forward_cpu(context, x, batch_size, seq_len, pos_offset, cache).await
+            }
+            AttentionDevice::Gpu => {
+                // Placeholder: call to GPU attention kernel (to be implemented)
+                // For now, fallback to CPU
+                self.forward_cpu(context, x, batch_size, seq_len, pos_offset, cache).await
+            }
+        }
+    }
+
+    /// CPU-based forward pass supporting variable batch size.
+    async fn forward_cpu(
+        &mut self,
+        context: &WgpuContext,
+        x: &[f32],
+        batch_size: usize,
+        seq_len: usize,
         pos_offset: usize,
         cache: Option<&mut KVCache>,
     ) -> Vec<f32> {
-        let batch_size = 1; // For now
-        let seq_len = x.len() / self.q_proj.in_features;
-
-        // 1. Projections
-        let mut query = self.q_proj.forward(context, x, batch_size * seq_len).await;
-        let mut key = self.k_proj.forward(context, x, batch_size * seq_len).await;
-        let value = self.v_proj.forward(context, x, batch_size * seq_len).await;
-
-        // 2. Apply RoPE
+        let _hidden_size = self.q_proj.in_features;
+        let total_tokens = batch_size * seq_len;
+        // --- 1. Projections (GPU-backed) ---
+        let mut query = self.q_proj.forward(context, x, total_tokens).await;
+        let mut key = self.k_proj.forward(context, x, total_tokens).await;
+        let value = self.v_proj.forward(context, x, total_tokens).await;
+        // --- 2. Apply RoPE (CPU) ---
         self.rotary_emb.forward(&mut query, self.num_heads, seq_len, pos_offset);
         self.rotary_emb.forward(&mut key, self.num_kv_heads, seq_len, pos_offset);
-
-        // 3. KV Caching
+        // --- 3. KV Caching (CPU) ---
         let (key, value, present_seq_len) = if let Some(cache) = cache {
             cache.key.extend_from_slice(&key);
             cache.value.extend_from_slice(&value);
@@ -215,41 +263,49 @@ impl Attention {
         } else {
             (key, value, seq_len)
         };
-
-        // 4. Grouped-Query Attention (GQA) - Repeat K and V heads
+        // --- 4. Grouped-Query Attention & Attention Calculation (CPU) ---
         let key = repeat_kv(&key, self.num_heads / self.num_kv_heads, self.num_kv_heads, present_seq_len, self.head_dim);
         let value = repeat_kv(&value, self.num_heads / self.num_kv_heads, self.num_kv_heads, present_seq_len, self.head_dim);
-
-        // 5. Scaled Dot-Product Attention
         let mut attn_output = vec![0.0; query.len()];
         let scale = 1.0 / (self.head_dim as f32).sqrt();
-
-        // Process each head
-        for h in 0..self.num_heads {
-            // Get head-specific slices
-            let q_head = get_head(&query, h, seq_len, self.head_dim);
-            let k_head = get_head(&key, h, present_seq_len, self.head_dim);
-            let v_head = get_head(&value, h, present_seq_len, self.head_dim);
-
-            // Attention scores: (q @ k.T) * scale
-            let mut scores = matmul_cpu(q_head, &transpose_cpu(k_head, present_seq_len, self.head_dim), seq_len, self.head_dim, present_seq_len);
-            scores.iter_mut().for_each(|s| *s *= scale);
-
-            // Apply causal mask
-            apply_causal_mask(&mut scores, seq_len, present_seq_len, pos_offset);
-
-            // Softmax
-            let weights = softmax_cpu(&scores, seq_len, present_seq_len);
-
-            // Weighted sum of values: weights @ v
-            let head_output = matmul_cpu(&weights, v_head, seq_len, present_seq_len, self.head_dim);
-            
-            // Scatter head output back to the main output tensor
-            set_head(&mut attn_output, &head_output, h, seq_len, self.head_dim);
+        for b in 0..batch_size {
+            for h in 0..self.num_heads {
+                let q_head = get_head_batch(&query, b, h, seq_len, self.head_dim, batch_size, self.num_heads);
+                let k_head = get_head(&key, h, present_seq_len, self.head_dim);
+                let v_head = get_head(&value, h, present_seq_len, self.head_dim);
+                let mut scores = matmul_cpu(q_head, &transpose_cpu(k_head, present_seq_len, self.head_dim), seq_len, self.head_dim, present_seq_len);
+                scores.iter_mut().for_each(|s| *s *= scale);
+                apply_causal_mask(&mut scores, seq_len, present_seq_len, pos_offset);
+                let weights = softmax_cpu(&scores, seq_len, present_seq_len);
+                let head_output = matmul_cpu(&weights, v_head, seq_len, present_seq_len, self.head_dim);
+                set_head_batch(&mut attn_output, &head_output, b, h, seq_len, self.head_dim, batch_size, self.num_heads);
+            }
         }
+        // --- 6. Final Output Projection (GPU-backed) ---
+        self.o_proj.forward(context, &attn_output, total_tokens).await
+    }
 
-        // 6. Final Output Projection
-        self.o_proj.forward(context, &attn_output, batch_size * seq_len).await
+    /// Backward-compatible forward method for model and legacy code.
+    pub async fn forward(
+        &mut self,
+        context: &WgpuContext,
+        x: &[f32],
+        pos_offset: usize,
+        cache: Option<&mut KVCache>,
+    ) -> Vec<f32> {
+        let hidden_size = self.q_proj.in_features;
+        let total_tokens = x.len() / hidden_size;
+        let batch_size = 1; // Legacy path assumes batch=1
+        let seq_len = total_tokens / batch_size;
+        self.forward_modern(
+            context,
+            x,
+            batch_size,
+            seq_len,
+            pos_offset,
+            cache,
+            AttentionDevice::Cpu,
+        ).await
     }
 }
 
@@ -275,12 +331,6 @@ fn get_head(data: &[f32], head_idx: usize, seq_len: usize, head_dim: usize) -> &
     let start = head_idx * seq_len * head_dim;
     let end = start + seq_len * head_dim;
     &data[start..end]
-}
-
-fn set_head(data: &mut [f32], head_data: &[f32], head_idx: usize, seq_len: usize, head_dim: usize) {
-    let start = head_idx * seq_len * head_dim;
-    let end = start + seq_len * head_dim;
-    data[start..end].copy_from_slice(head_data);
 }
 
 fn matmul_cpu(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
@@ -333,9 +383,25 @@ fn softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     output
 }
 
+// --- Batch helpers ---
+fn get_head_batch<'a>(data: &'a [f32], batch_idx: usize, head_idx: usize, seq_len: usize, head_dim: usize, _batch_size: usize, num_heads: usize) -> &'a [f32] {
+    let heads_per_batch = num_heads;
+    let start = (batch_idx * heads_per_batch * seq_len * head_dim) + (head_idx * seq_len * head_dim);
+    let end = start + seq_len * head_dim;
+    &data[start..end]
+}
+
+fn set_head_batch(data: &mut [f32], head_data: &[f32], batch_idx: usize, head_idx: usize, seq_len: usize, head_dim: usize, _batch_size: usize, num_heads: usize) {
+    let heads_per_batch = num_heads;
+    let start = (batch_idx * heads_per_batch * seq_len * head_dim) + (head_idx * seq_len * head_dim);
+    let end = start + seq_len * head_dim;
+    data[start..end].copy_from_slice(head_data);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
 
     #[test]
     fn test_attention_config() {
@@ -359,5 +425,17 @@ mod tests {
         let config = AttentionConfig::new(1024, 16, 16, 32);
         let attention = config.init();
         assert_eq!(attention.head_dim, 64); // 1024 / 16
+    }
+
+    #[tokio::test]
+    async fn test_attention_batch2_shape() {
+        let config = AttentionConfig::new(32, 4, 4, 8);
+        let mut attention = config.init();
+        let batch_size = 2;
+        let seq_len = 4;
+        let input = vec![0.1; batch_size * seq_len * attention.q_proj.in_features];
+        let context = WgpuContext::new().await.expect("Failed to create WgpuContext");
+        let output = attention.forward_modern(&context, &input, batch_size, seq_len, 0, None, AttentionDevice::Cpu).await;
+        assert_eq!(output.len(), batch_size * seq_len * config.hidden_size);
     }
 }

@@ -1577,10 +1577,14 @@ fn cross_device_consistency_test() {
             };
 
             let features = device.features();
+            let adapter_info = info;
+            let limits = device.limits();
             let context = WgpuContext {
                 device: Arc::new(device),
                 queue: Arc::new(queue),
                 features,
+                adapter_info,
+                limits,
             };
             run_correctness_logic(&context, 14).await;
         }

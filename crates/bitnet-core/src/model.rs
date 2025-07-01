@@ -316,18 +316,13 @@ impl Transformer {
         let (norm_record, _): (RmsNormRecord, _) = decode_from_slice(&norm_bytes, standard())?;
         let norm = BitnetRmsNorm::from_record(norm_record);
 
-        // Note: The final output layer is also a linear projection.
-        // We'll treat it as a BitLinear for consistency, though it might not be quantized.
-        // The converter saves it as an EmbeddingRecord, which we can adapt.
+        // Output projection (lm_head)
         let output_path = dir.join("lm_head.bin");
         let output_bytes = fs::read(&output_path)?;
         let (lm_head_record, _): (EmbeddingRecord, _) = decode_from_slice(&output_bytes, standard())?;
-        
-        // This is a placeholder. A real model might have a different packing for the LM head.
-        // For now, we assume it's not a true BitLinear but can be represented by it.
         let output = BitLinear {
-            packed_weights: vec![0; (lm_head_record.shape[0] * lm_head_record.shape[1] + 15) / 16],
-            weight_scales: vec![1.0; lm_head_record.shape[0]],
+            packed_weights: lm_head_record.weight.iter().map(|&f| f as u32).collect(), // This may need to be adapted if quantized
+            weight_scales: vec![1.0; lm_head_record.shape[0]], // Placeholder, adapt if needed
             in_features: lm_head_record.shape[1],
             out_features: lm_head_record.shape[0],
         };
@@ -345,20 +340,23 @@ impl Transformer {
             let block_bytes = fs::read(&block_path)?;
             let (block_record, _): (TransformerBlockRecord, _) = decode_from_slice(&block_bytes, standard())?;
 
+            // Split wqkv into Q, K, V BitLinearRecords using the unified function
+            let (q_proj, k_proj, v_proj) = split_wqkv_record(&block_record.attention.wqkv, &attn_config);
+
             let layer = Layer {
                 attn: Attention::from_records(
-                    block_record.attention.wqkv.clone(), // Placeholder
-                    block_record.attention.wqkv.clone(), // Placeholder
-                    block_record.attention.wqkv,
-                    block_record.attention.o_proj,
+                    q_proj,
+                    k_proj,
+                    v_proj,
+                    block_record.attention.o_proj.clone(),
                     &attn_config,
                 ),
                 ffn: FeedForward::from_records(
-                    block_record.feed_forward.w13,
-                    block_record.feed_forward.w2,
+                    block_record.feed_forward.w13.clone(),
+                    block_record.feed_forward.w2.clone(),
                 ),
-                attention_norm: BitnetRmsNorm::from_record(block_record.attention_norm),
-                ffn_norm: BitnetRmsNorm::from_record(block_record.ffn_norm),
+                attention_norm: BitnetRmsNorm::from_record(block_record.attention_norm.clone()),
+                ffn_norm: BitnetRmsNorm::from_record(block_record.ffn_norm.clone()),
             };
             layers.push(layer);
         }
@@ -424,6 +422,51 @@ impl Transformer {
     }
 }
 
+/// Correct QKV split logic for BitNet ternary packing
+pub(crate) fn split_wqkv_record(
+    wqkv: &bitnet_converter::packer::BitLinearRecord,
+    attn_config: &AttentionConfig
+) -> (bitnet_converter::packer::BitLinearRecord, bitnet_converter::packer::BitLinearRecord, bitnet_converter::packer::BitLinearRecord) {
+    let head_dim = attn_config.hidden_size / attn_config.num_heads;
+    let q_dim = attn_config.num_heads * head_dim;
+    let k_dim = attn_config.num_kv_heads * head_dim;
+    let v_dim = attn_config.num_kv_heads * head_dim;
+    let in_features = wqkv.in_features;
+    let packed_per_row = (in_features + 15) / 16;
+
+    let q_packed = q_dim * packed_per_row;
+    let k_packed = k_dim * packed_per_row;
+    let v_packed = v_dim * packed_per_row;
+
+    let q_end = q_packed;
+    let k_end = q_end + k_packed;
+    let v_end = k_end + v_packed;
+
+    let q_scale_end = q_dim;
+    let k_scale_end = q_scale_end + k_dim;
+    let v_scale_end = k_scale_end + v_dim;
+
+    let q_rec = bitnet_converter::packer::BitLinearRecord {
+        packed_weights: wqkv.packed_weights[0..q_end].to_vec(),
+        weight_scales: wqkv.weight_scales[0..q_scale_end].to_vec(),
+        in_features,
+        out_features: q_dim,
+    };
+    let k_rec = bitnet_converter::packer::BitLinearRecord {
+        packed_weights: wqkv.packed_weights[q_end..k_end].to_vec(),
+        weight_scales: wqkv.weight_scales[q_scale_end..k_scale_end].to_vec(),
+        in_features,
+        out_features: k_dim,
+    };
+    let v_rec = bitnet_converter::packer::BitLinearRecord {
+        packed_weights: wqkv.packed_weights[k_end..v_end].to_vec(),
+        weight_scales: wqkv.weight_scales[k_scale_end..v_scale_end].to_vec(),
+        in_features,
+        out_features: v_dim,
+    };
+    (q_rec, k_rec, v_rec)
+}
+
 impl Default for Transformer {
     /// Creates a minimal default Transformer for testing purposes.
     /// This implementation uses dummy data and should not be used in production.
@@ -458,6 +501,12 @@ impl Default for Transformer {
 mod tests {
     use super::*;
     use crate::bitnetcore_test_utils::{mini_model_config, mini_dummy_transformer};
+    use bitnet_converter::packer::{BitLinearRecord};
+    use std::fs::File;
+    use std::io::Write;
+    use tempfile::tempdir;
+    use bincode::config::standard;
+    use bincode::serde::encode_to_vec;
 
     #[test]
     fn test_model_config() {
@@ -482,5 +531,200 @@ mod tests {
         let output = model.forward(&context, 0, 0, &mut [KVCache::default()]).await?;
         assert_eq!(output.len(), model.output.out_features);
         Ok(())
+    }
+
+    #[test]
+    fn test_split_wqkv() {
+        // For config: num_heads=2, num_key_value_heads=2, head_dim=3, in_features=3
+        let in_features = 3;
+        let head_dim = 3;
+        let num_heads = 2;
+        let num_kv_heads = 2;
+        let q_dim = num_heads * head_dim;
+        let k_dim = num_kv_heads * head_dim;
+        let v_dim = num_kv_heads * head_dim;
+        let packed_per_row = (in_features + 15) / 16; // =1 for in_features=3
+        let total_rows = q_dim + k_dim + v_dim; // 18
+        let total_packed = total_rows * packed_per_row; // 18
+        let rec = BitLinearRecord {
+            packed_weights: (1..=total_packed as u32).collect(),
+            weight_scales: (1..=total_rows as u32).map(|x| x as f32).collect(),
+            in_features,
+            out_features: total_rows,
+        };
+        let attn_cfg = AttentionConfig::new(num_heads * head_dim, num_heads, num_kv_heads, 8); // hidden=6, 2 heads, 2 kv heads
+        let (q, k, v) = split_wqkv_record(&rec, &attn_cfg);
+        assert_eq!(q.packed_weights, (1..=6).collect::<Vec<u32>>());
+        assert_eq!(k.packed_weights, (7..=12).collect::<Vec<u32>>());
+        assert_eq!(v.packed_weights, (13..=18).collect::<Vec<u32>>());
+        assert_eq!(q.weight_scales, (1..=6).map(|x| x as f32).collect::<Vec<f32>>());
+        assert_eq!(k.weight_scales, (7..=12).map(|x| x as f32).collect::<Vec<f32>>());
+        assert_eq!(v.weight_scales, (13..=18).map(|x| x as f32).collect::<Vec<f32>>());
+        assert_eq!(q.out_features, 6);
+        assert_eq!(k.out_features, 6);
+        assert_eq!(v.out_features, 6);
+    }
+
+    #[test]
+    fn test_model_loading_from_dummy_files() {
+        // Use tempfile to create a temp dir
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+        // Use config that matches the QKV split test
+        let config = ModelConfig {
+            hidden_size: 6, // num_heads * head_dim
+            intermediate_size: 8,
+            num_hidden_layers: 1,
+            num_attention_heads: 2,
+            num_key_value_heads: 2,
+            vocab_size: 10,
+            rms_norm_eps: 1e-6,
+            dropout: 0.0,
+            max_seq_len: 8,
+        };
+        // Dummy embedding and output
+        let embedding = vec![0.1; config.vocab_size * config.hidden_size];
+        let embedding_shape = vec![config.vocab_size, config.hidden_size];
+        let output = BitLinear {
+            packed_weights: vec![0; config.vocab_size],
+            weight_scales: vec![1.0; config.vocab_size],
+            in_features: config.hidden_size,
+            out_features: config.vocab_size,
+        };
+        let norm = BitnetRmsNorm::new(vec![1.0; config.hidden_size], config.rms_norm_eps);
+
+        // Write embedding.bin
+        let embedding_record = bitnet_converter::packer::EmbeddingRecord {
+            weight: embedding.clone(),
+            shape: embedding_shape.clone(),
+        };
+        let embedding_bytes = bincode::serde::encode_to_vec(embedding_record, bincode::config::standard()).unwrap();
+        let mut f = std::fs::File::create(path.join("embedding.bin")).unwrap();
+        f.write_all(&embedding_bytes).unwrap();
+
+        // Write norm.bin
+        let norm_record = bitnet_converter::packer::RmsNormRecord {
+            weight: norm.weight.clone(),
+            shape: vec![norm.weight.len()],
+        };
+        let norm_bytes = bincode::serde::encode_to_vec(norm_record, bincode::config::standard()).unwrap();
+        let mut f = std::fs::File::create(path.join("norm.bin")).unwrap();
+        f.write_all(&norm_bytes).unwrap();
+
+        // Write lm_head.bin
+        let lm_head_record = bitnet_converter::packer::EmbeddingRecord {
+            weight: output.packed_weights.iter().map(|&x| x as f32).collect(),
+            shape: vec![output.out_features, output.in_features],
+        };
+        let lm_head_bytes = bincode::serde::encode_to_vec(lm_head_record, bincode::config::standard()).unwrap();
+        let mut f = std::fs::File::create(path.join("lm_head.bin")).unwrap();
+        f.write_all(&lm_head_bytes).unwrap();
+
+        // Write block_0.bin (only 1 layer)
+        let in_features = 3;
+        let head_dim = 3;
+        let num_heads = 2;
+        let num_kv_heads = 2;
+        let q_dim = num_heads * head_dim;
+        let k_dim = num_kv_heads * head_dim;
+        let v_dim = num_kv_heads * head_dim;
+        let packed_per_row = (in_features + 15) / 16;
+        let total_rows = q_dim + k_dim + v_dim;
+        let total_packed = total_rows * packed_per_row;
+        let wqkv = BitLinearRecord {
+            packed_weights: (1..=total_packed as u32).collect(),
+            weight_scales: (1..=total_rows as u32).map(|x| x as f32).collect(),
+            in_features,
+            out_features: total_rows,
+        };
+        let o_proj = BitLinearRecord {
+            packed_weights: vec![101,102],
+            weight_scales: vec![0.7,0.8],
+            in_features: 2,
+            out_features: 2,
+        };
+        let w13 = BitLinearRecord {
+            packed_weights: vec![103,104],
+            weight_scales: vec![0.9,1.0],
+            in_features: 2,
+            out_features: 2,
+        };
+        let w2 = BitLinearRecord {
+            packed_weights: vec![105,106],
+            weight_scales: vec![1.1,1.2],
+            in_features: 2,
+            out_features: 2,
+        };
+        let block_record = bitnet_converter::packer::TransformerBlockRecord {
+            attention: bitnet_converter::packer::AttentionRecord { wqkv: wqkv.clone(), o_proj: o_proj.clone() },
+            feed_forward: bitnet_converter::packer::FeedForwardRecord { w13: w13.clone(), w2: w2.clone() },
+            attention_norm: bitnet_converter::packer::RmsNormRecord { weight: vec![1.0, 1.0], shape: vec![2] },
+            ffn_norm: bitnet_converter::packer::RmsNormRecord { weight: vec![1.0, 1.0], shape: vec![2] },
+        };
+        let block_bytes = bincode::serde::encode_to_vec(block_record, bincode::config::standard()).unwrap();
+        let mut f = std::fs::File::create(path.join("block_0.bin")).unwrap();
+        f.write_all(&block_bytes).unwrap();
+
+        // Now try to load the model
+        let loaded = Transformer::from_dir(path, config.clone()).unwrap();
+        assert_eq!(loaded.embedding, embedding);
+        assert_eq!(loaded.embedding_shape, embedding_shape);
+        assert_eq!(loaded.layers.len(), 1);
+        // Check QKV split
+        let attn_cfg = AttentionConfig::new(num_heads * head_dim, num_heads, num_kv_heads, 8);
+        let (q, k, v) = split_wqkv_record(&wqkv, &attn_cfg);
+        if loaded.layers[0].attn.q_proj.packed_weights != q.packed_weights {
+            println!("Loaded Q packed_weights: {:?}", loaded.layers[0].attn.q_proj.packed_weights);
+            println!("Expected Q packed_weights: {:?}", q.packed_weights);
+        }
+        assert_eq!(loaded.layers[0].attn.q_proj.packed_weights, q.packed_weights);
+        assert_eq!(loaded.layers[0].attn.k_proj.packed_weights, k.packed_weights);
+        assert_eq!(loaded.layers[0].attn.v_proj.packed_weights, v.packed_weights);
+    }
+
+    #[test]
+    fn test_model_loading_missing_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+        let config = mini_model_config();
+        // Don't write any files
+        let result = Transformer::from_dir(path, config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_model_loading_zero_layers() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+        let mut config = mini_model_config();
+        config.num_hidden_layers = 0;
+        let dummy = mini_dummy_transformer();
+        // Write embedding.bin
+        let embedding_record = bitnet_converter::packer::EmbeddingRecord {
+            weight: dummy.embedding.clone(),
+            shape: dummy.embedding_shape.clone(),
+        };
+        let embedding_bytes = encode_to_vec(embedding_record, standard()).unwrap();
+        let mut f = File::create(path.join("embedding.bin")).unwrap();
+        f.write_all(&embedding_bytes).unwrap();
+        // Write norm.bin
+        let norm_record = bitnet_converter::packer::RmsNormRecord {
+            weight: dummy.norm.weight.clone(),
+            shape: vec![dummy.norm.weight.len()],
+        };
+        let norm_bytes = encode_to_vec(norm_record, standard()).unwrap();
+        let mut f = File::create(path.join("norm.bin")).unwrap();
+        f.write_all(&norm_bytes).unwrap();
+        // Write lm_head.bin
+        let lm_head_record = bitnet_converter::packer::EmbeddingRecord {
+            weight: dummy.output.packed_weights.iter().map(|&x| x as f32).collect(),
+            shape: vec![dummy.output.out_features, dummy.output.in_features],
+        };
+        let lm_head_bytes = encode_to_vec(lm_head_record, standard()).unwrap();
+        let mut f = File::create(path.join("lm_head.bin")).unwrap();
+        f.write_all(&lm_head_bytes).unwrap();
+        // Now try to load the model
+        let loaded = Transformer::from_dir(path, config.clone()).unwrap();
+        assert_eq!(loaded.layers.len(), 0);
     }
 }

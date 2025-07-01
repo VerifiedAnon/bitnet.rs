@@ -41,17 +41,9 @@ bitnet-rs/
 │   │   ├── src/
 │   │   │   ├── lib.rs         ✅ Main library module declarations
 │   │   │   ├── error.rs       ✅ Fully implemented using `thiserror` for robust error handling.
-│   │   │   ├── model.rs       🟡 Partial, struct and forward logic present, weight loading from file is stubbed.
-│   │   │   │   - [🟠] `from_dir` loader is a stub and needs implementation.
-│   │   │   │   - [✅] `Transformer` and `Layer` structs are implemented.
-│   │   │   │   - [✅] Embedding lookup is implemented in `forward`.
-│   │   │   │   - [✅] Forward pass through all layers is implemented.
-│   │   │   │   - [🟠] Final norm and logits head are missing from the `forward` pass.
-│   │   │   │   - [🟠] Generation loop with sampling is not implemented.
-│   │   │   ├── attention.rs   🟡 Partial, struct and `from_weights` logic present, core `forward` logic is a stub.
-│   │   │   │   - [🟠] Multi-head attention, RoPE, and scaled dot-product attention are not implemented.
-│   │   │   ├── feed_forward.rs🟡 Partial, struct and `from_weights` logic present, uses GELU instead of SwiGLU.
-│   │   │   │   - [🟠] Implement SwiGLU activation function as intended.
+│   │   │   ├── model.rs       ✅ Complete, struct, forward logic, and loader implemented and tested.
+│   │   │   ├── attention.rs   ✅ Complete for inference: robust, tested, batching, quantized, transformer-compatible. ❌ Missing : No training/LoRA yet.
+│   │   │   ├── feed_forward.rs🟡 Partial, uses Squared ReLU (sufficient for b1.58), not SwiGLU as in all BitNet papers.
 │   │   │   ├── rms_norm.rs    ✅ `RMSNorm` logic is fully implemented and tested.
 │   │   │   ├── bitnet_linear.rs ✅ Quantized linear layer with `forward` pass and `from_record` loader.
 │   │   │   ├── tokenizer.rs   ✅ Wrapper for Hugging Face tokenizer with encode/decode and basic chat formatting.
@@ -63,16 +55,21 @@ bitnet-rs/
 │   │   │   ├── kernels.rs     ✅ `pack_ternary_weights` and `calculate_weight_scales` are implemented and tested.
 │   │   │   ├── kernels/
 │   │   │   │   ├── bitnet_kernel.wgsl ✅ Optimized WGSL kernel for ternary matrix multiplication.
+│   │   │   │   ├── bitnet_kernel_optimal.wgsl ✅ Optimized WGSL kernel variant.
+│   │   │   │   ├── bitnet_kernel_wasm.wgsl ✅ WASM/browser-optimized kernel.
 │   │   │   │   └── README.md          ✅ Documentation for BitNet kernels.
-│   │   │   └── gui/               # Core-level visualization and debugging UI for developers and advanced users
-│   │   │       ├── mod.rs             ✅ GUI module declarations.
-│   │   │       ├── dashboard.rs       🟠 Stub, minimal eframe app, no actual dashboard UI.
-│   │   │       ├── weights_viewer.rs  🟠 Stub, placeholder UI, no visualization logic.
-│   │   │       ├── kernel_profiler.rs 🟠 Stub, placeholder UI, no profiling logic.
-│   │   │       ├── attention_map.rs   🟠 Stub, placeholder UI, no visualization logic.
-│   │   │       └── README.md          ✅ Core GUI documentation.
+│   │   │   ├── gui/               # Core-level visualization and debugging UI for developers and advanced users
+│   │   │   │   ├── mod.rs             ✅ GUI module declarations.
+│   │   │   │   ├── dashboard.rs       🟠 Stub, minimal eframe app, no actual dashboard UI.
+│   │   │   │   ├── weights_viewer.rs  🟠 Stub, placeholder UI, no visualization logic.
+│   │   │   │   ├── kernel_profiler.rs 🟠 Stub, placeholder UI, no profiling logic.
+│   │   │   │   ├── attention_map.rs   🟠 Stub, placeholder UI, no visualization logic.
+│   │   │   │   └── README.md          ✅ Core GUI documentation.
+│   │   │   ├── bitnetcore_test_utils.rs ✅ Test utilities for core module.
 │   │   └── tests/
 │   │       ├── kernel_tests.rs         ✅ Comprehensive correctness, dimension, and edge-case tests against a scalar reference.
+│   │       ├── kernel_tests_fastest.rs ✅ Fastest kernel tests, similar to above.
+│   │       ├── DX12_test.rs            ✅ DX12 backend tests.
 │   │       ├── pipeline_integration.rs ✅ End-to-end pipeline test suite implemented with robust test reporting.
 │   │       └── pipeline_validation.rs  🟡 Partial, test present for model loading/generation, not full golden tests.
 │   │
@@ -146,3 +143,11 @@ bitnet-rs/
 
 - [ ] Tauri/egui GUI integration
 - [ ] ONNX/other backend support
+
+## TODO / Roadmap
+
+- [ ] CLI/GUI chat loop in bitnet-app for end-to-end chat demo (🟠 Stub, needs implementation)
+- [ ] Training/LoRA support (❌ Missing, future work)
+- [ ] GPU attention kernel integration (🟡 Partial, only CPU path robust)
+- [ ] Flash attention/advanced features (❌ Missing, future work)
+- [ ] Integrate InferenceSettings (settings.rs) into the inference pipeline, attention, and generation modules (❌ Missing, future work)

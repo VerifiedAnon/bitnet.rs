@@ -1,50 +1,50 @@
 # PIPELINE_INTEGRATION Test Report
 
-> Generated on: 2025-06-23 13:52:29
+> Generated on: 2025-07-01 11:35:55
 
 ## Test Results
 
-| No. | Test Name | Status | Time Taken |
-|:---:|:----------|:------:|:----------:|
-|  1 | Config Json Parsing                                | ✅ Pass |  687.00 ms |
-|  2 | Conversion Outputs Blocks                          | ✅ Pass | 214.88 sec |
-|  3 | Error On Missing Tensor                            | ✅ Pass |    0.00 ms |
-|  4 | Layer Quantization And Packing                     | ✅ Pass |    0.00 ms |
-|  5 | Load Some Blocks                                   | ✅ Pass |   2.22 sec |
-|  6 | Model Files Present                                | ✅ Pass |  958.00 ms |
-|  7 | Per Block Deserialization                          | ✅ Pass |   1.40 sec |
-|  8 | Per Block Serialization                            | ✅ Pass | 198.86 sec |
-|  9 | Required Files Present                             | ✅ Pass |  430.00 ms |
-| 10 | Safetensors Loading                                | ✅ Pass |  700.00 ms |
-| 11 | Tensor Conversion Bf16 To F32                      | ✅ Pass |    0.00 ms |
+| No. | Test Name | Status | Time Taken | Error Message |
+|:---:|:----------|:------:|:----------:|:-------------|
+|  1 | Config Json Parsing                                | ✅ Pass |  494.00 ms |             |
+|  2 | Conversion Outputs Blocks                          | ✅ Pass | 219.89 sec |             |
+|  3 | Error On Missing Tensor                            | ✅ Pass |    0.00 ms |             |
+|  4 | Layer Quantization And Packing                     | ✅ Pass |    0.00 ms |             |
+|  5 | Load Some Blocks                                   | ✅ Pass |   1.60 sec |             |
+|  6 | Model Files Present                                | ✅ Pass |  599.00 ms |             |
+|  7 | Per Block Deserialization                          | ✅ Pass |   1.53 sec |             |
+|  8 | Per Block Serialization                            | ✅ Pass | 203.95 sec |             |
+|  9 | Required Files Present                             | ✅ Pass |  410.00 ms |             |
+| 10 | Safetensors Loading                                | ✅ Pass |  489.00 ms |             |
+| 11 | Tensor Conversion Bf16 To F32                      | ✅ Pass |    0.00 ms |             |
 
 <details>
 <summary>📝 View Full Log Dump</summary>
 
 ```
-[2025-06-23, 13:45:29.836] -> Ensuring model files are present (downloading if needed)...
-[2025-06-23, 13:45:30.795] -> Model files ready (took 958.79ms)
-[2025-06-23, 13:45:31.226] -> Running conversion and checking per-block outputs...
-[2025-06-23, 13:49:06.104] -> Conversion and block outputs check passed (took 214.88s)
-[2025-06-23, 13:49:06.105] -> Loading and deserializing some per-block files...
-[2025-06-23, 13:49:08.326] -> Per-block file load/deserialization check passed (took 2.22s)
-[2025-06-23, 13:45:30.795] -> Checking for required model files...
-[2025-06-23, 13:45:31.226] -> Required files check passed (took 430.94ms)
-[2025-06-23, 13:49:08.326] -> Parsing config.json...
-[2025-06-23, 13:49:09.014] -> config.json parsing check passed (took 687.81ms)
-[2025-06-23, 13:49:09.014] -> Loading and validating safetensors...
-[2025-06-23, 13:49:09.715] -> Safetensors loading check passed (took 700.47ms)
-[2025-06-23, 13:49:09.715] -> Testing BF16 to F32 conversion...
-[2025-06-23, 13:49:09.715] -> BF16 to F32 conversion check passed (took 209.90µs)
-[2025-06-23, 13:49:09.715] -> Testing layer quantization and packing...
-[2025-06-23, 13:49:09.716] -> Layer quantization and packing check passed (took 160.30µs)
-[2025-06-23, 13:49:09.716] -> Testing per-block serialization...
-[2025-06-23, 13:52:28.581] -> Per-block serialization check passed (took 198.86s)
-[2025-06-23, 13:52:28.581] -> Testing per-block deserialization...
-[2025-06-23, 13:52:29.986] -> Per-block deserialization check passed (took 1.40s)
-[2025-06-23, 13:52:29.986] -> Testing error on shape mismatch...
-[2025-06-23, 13:52:29.987] -> Shape mismatch error check passed (took 652.30µs)
-[2025-06-23, 13:45:29.835] -> STARTING END-TO-END PIPELINE VALIDATION
+[2025-07-01, 11:28:46.508] -> Ensuring model files are present (downloading if needed)...
+[2025-07-01, 11:28:47.107] -> Model files ready (took 599.90ms)
+[2025-07-01, 11:28:47.519] -> Running conversion and checking per-block outputs...
+[2025-07-01, 11:32:27.406] -> Conversion and block outputs check passed (took 219.89s)
+[2025-07-01, 11:32:27.407] -> Loading and deserializing some per-block files...
+[2025-07-01, 11:32:29.009] -> Per-block file load/deserialization check passed (took 1.60s)
+[2025-07-01, 11:28:47.108] -> Checking for required model files...
+[2025-07-01, 11:28:47.518] -> Required files check passed (took 410.78ms)
+[2025-07-01, 11:32:29.009] -> Parsing config.json...
+[2025-07-01, 11:32:29.503] -> config.json parsing check passed (took 494.06ms)
+[2025-07-01, 11:32:29.503] -> Loading and validating safetensors...
+[2025-07-01, 11:32:29.993] -> Safetensors loading check passed (took 489.60ms)
+[2025-07-01, 11:32:29.993] -> Testing BF16 to F32 conversion...
+[2025-07-01, 11:32:29.994] -> BF16 to F32 conversion check passed (took 219.70µs)
+[2025-07-01, 11:32:29.994] -> Testing layer quantization and packing...
+[2025-07-01, 11:32:29.994] -> Layer quantization and packing check passed (took 173.00µs)
+[2025-07-01, 11:32:29.994] -> Testing per-block serialization...
+[2025-07-01, 11:35:53.940] -> Per-block serialization check passed (took 203.95s)
+[2025-07-01, 11:35:53.940] -> Testing per-block deserialization...
+[2025-07-01, 11:35:55.469] -> Per-block deserialization check passed (took 1.53s)
+[2025-07-01, 11:35:55.469] -> Testing error on shape mismatch...
+[2025-07-01, 11:35:55.470] -> Shape mismatch error check passed (took 645.40µs)
+[2025-07-01, 11:28:46.507] -> STARTING END-TO-END PIPELINE VALIDATION
 ```
 
 </details>
@@ -60,8 +60,8 @@
 
 ### Timing Information
 
-- **Total Time:** 420.15 sec
-- **Average Time:** 38195.00 ms
+- **Total Time:** 428.97 sec
+- **Average Time:** 38996.00 ms
 
 ### Status
 

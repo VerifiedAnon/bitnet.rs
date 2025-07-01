@@ -17,6 +17,8 @@ use std::sync::Arc;
 /// * `device` - The WGPU device for executing compute operations.
 /// * `queue` - The command queue for submitting GPU commands.
 /// * `features` - The features enabled on the device.
+/// * `adapter_info` - Information about the WGPU adapter.
+/// * `limits` - The device limits.
 #[derive(Clone, Debug)]
 pub struct WgpuContext {
     /// The WGPU device, wrapped in Arc for thread-safe sharing.
@@ -25,6 +27,10 @@ pub struct WgpuContext {
     pub queue: Arc<wgpu::Queue>,
     /// The features enabled on the device.
     pub features: wgpu::Features,
+    /// Information about the WGPU adapter.
+    pub adapter_info: wgpu::AdapterInfo,
+    /// The device limits.
+    pub limits: wgpu::Limits,
 }
 
 impl WgpuContext {
@@ -82,11 +88,15 @@ impl WgpuContext {
             .map_err(BitNetError::RequestDeviceError)?;
 
         let features = device.features();
+        let adapter_info = adapter.get_info();
+        let limits = device.limits();
 
         Ok(Self {
             device: Arc::new(device),
             queue: Arc::new(queue),
             features,
+            adapter_info,
+            limits,
         })
     }
 
@@ -125,11 +135,65 @@ impl WgpuContext {
             .map_err(BitNetError::RequestDeviceError)?;
 
         let features = device.features();
+        let adapter_info = adapter.get_info();
+        let limits = device.limits();
 
         Ok(Self {
             device: Arc::new(device),
             queue: Arc::new(queue),
             features,
+            adapter_info,
+            limits,
+        })
+    }
+
+    /// Creates a new WGPU context with the specified GPU backend(s).
+    ///
+    /// This allows explicit selection of Vulkan, DX12, Metal, or OpenGL for testing and validation.
+    /// Returns an error if no suitable adapter is found or device creation fails.
+    pub async fn new_with_backend(backends: wgpu::Backends) -> Result<Self, BitNetError> {
+        let instance_desc = wgpu::InstanceDescriptor {
+            backends,
+            ..Default::default()
+        };
+        let instance = wgpu::Instance::new(&instance_desc);
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                force_fallback_adapter: false,
+                compatible_surface: None,
+            })
+            .await
+            .map_err(|_| BitNetError::NoSuitableAdapter)?;
+
+        let mut required_features = wgpu::Features::empty();
+        if adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+            required_features |= wgpu::Features::TIMESTAMP_QUERY;
+        }
+
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("Bitnet Device"),
+                    required_features,
+                    required_limits: Default::default(),
+                    memory_hints: wgpu::MemoryHints::default(),
+                    trace: wgpu::Trace::default(),
+                }
+            )
+            .await
+            .map_err(BitNetError::RequestDeviceError)?;
+
+        let features = device.features();
+        let adapter_info = adapter.get_info();
+        let limits = device.limits();
+
+        Ok(Self {
+            device: Arc::new(device),
+            queue: Arc::new(queue),
+            features,
+            adapter_info,
+            limits,
         })
     }
 }

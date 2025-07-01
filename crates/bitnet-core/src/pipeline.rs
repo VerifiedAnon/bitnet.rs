@@ -10,7 +10,15 @@ use crate::tokenizer::Tokenizer;
 use crate::wgpu_context::WgpuContext;
 use std::fs;
 use std::sync::Arc;
-use std::time::Instant;
+use rayon::ThreadPoolBuilder;
+
+/// Backend selection for the pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PipelineBackend {
+    Cpu,
+    Gpu,
+    Auto,
+}
 
 /// Options for configuring the BitNet Pipeline.
 pub struct PipelineOptions {
@@ -22,6 +30,10 @@ pub struct PipelineOptions {
     pub output_dir: Option<PathBuf>,
     /// Optional closure for progress reporting: (step, message)
     pub reporter: Option<Arc<dyn Fn(usize, &str) + Send + Sync>>,
+    /// Backend selection for inference (CPU, GPU, or Auto)
+    pub backend: PipelineBackend,
+    /// Optional inference/generation settings
+    pub settings: Option<crate::settings::InferenceSettings>,
     // Add more options as needed
 }
 
@@ -31,6 +43,8 @@ impl std::fmt::Debug for PipelineOptions {
             .field("model_id", &self.model_id)
             .field("input_dir", &self.input_dir)
             .field("output_dir", &self.output_dir)
+            .field("backend", &self.backend)
+            .field("settings", &self.settings)
             .finish()
     }
 }
@@ -42,6 +56,8 @@ impl Clone for PipelineOptions {
             input_dir: self.input_dir.clone(),
             output_dir: self.output_dir.clone(),
             reporter: self.reporter.clone(),
+            backend: self.backend,
+            settings: self.settings.clone(),
         }
     }
 }
@@ -54,6 +70,9 @@ pub struct Pipeline {
     pub model_dir: PathBuf,
     /// Path to the converted model directory
     pub converted_dir: PathBuf,
+    /// Inference/generation settings
+    pub settings: Option<crate::settings::InferenceSettings>,
+    pub backend: PipelineBackend,
 }
 
 /// Result of running inference through the pipeline.
@@ -98,13 +117,18 @@ impl Pipeline {
         let model_id = options.model_id.clone().unwrap_or(DEFAULT_MODEL_ID.to_string());
         let model_dir = options.input_dir.clone().unwrap_or_else(|| original_dir().join(&model_id));
         let converted_dir = options.output_dir.clone().unwrap_or_else(|| converted_dir().join(&model_id));
-        Ok(Self { options, model_dir, converted_dir })
+        Ok(Self {
+            options: options.clone(),
+            model_dir,
+            converted_dir,
+            settings: options.settings.clone(),
+            backend: options.backend,
+        })
     }
 
     /// Ensures model files are present and converted. Runs blocking code in spawn_blocking.
     pub async fn ensure_model_ready(&self) -> Result<(), PipelineError> {
         let reporter = self.options.reporter.as_ref();
-        let t0 = Instant::now();
         if let Some(cb) = reporter { cb(1, "Step 1: Downloading/Verifying original model files..."); }
         let model_id = self.options.model_id.clone().unwrap_or_else(|| DEFAULT_MODEL_ID.to_string());
         let model_dir = self.model_dir.clone();
@@ -133,57 +157,69 @@ impl Pipeline {
     /// Loads the model, tokenizer, and runs a forward pass on the given prompt.
     pub async fn run_inference(&self, prompt: &str) -> Result<PipelineResult, PipelineError> {
         let reporter = self.options.reporter.as_ref();
-        let t0 = Instant::now();
-        if let Some(cb) = reporter { cb(2, "Step 1: Loading model..."); }
-        // Load config
-        let config_path = self.model_dir.join(constants::CONFIG_JSON);
-        let config_str = fs::read_to_string(&config_path).map_err(|e| PipelineError::ModelFile(format!("{e}")))?;
-        let hf_config: serde_json::Value = serde_json::from_str(&config_str).map_err(|e| PipelineError::ModelFile(format!("{e}")))?;
-        let model_config = ModelConfig {
-            hidden_size: hf_config["hidden_size"].as_u64().unwrap() as usize,
-            intermediate_size: hf_config["intermediate_size"].as_u64().unwrap() as usize,
-            num_hidden_layers: hf_config["num_hidden_layers"].as_u64().unwrap() as usize,
-            num_attention_heads: hf_config["num_attention_heads"].as_u64().unwrap() as usize,
-            num_key_value_heads: hf_config["num_key_value_heads"].as_u64().unwrap() as usize,
-            vocab_size: hf_config["vocab_size"].as_u64().unwrap() as usize,
-            max_seq_len: 4096,
-            rms_norm_eps: hf_config["rms_norm_eps"].as_f64().unwrap() as f32,
-            dropout: 0.0,
-        };
-        let mut model = Transformer::from_dir(&self.converted_dir, model_config)
-            .map_err(|e| PipelineError::ModelLoad(format!("{e}")))?;
-        if let Some(cb) = reporter { cb(2, "Step 1: Complete."); }
-        if let Some(cb) = reporter { cb(2, "Step 2: Loading tokenizer..."); }
-        // Tokenizer
-        let tokenizer_path = self.model_dir.join("tokenizer.json");
-        let tokenizer = Tokenizer::from_file(tokenizer_path.to_str().unwrap())
-            .map_err(|e| PipelineError::Tokenizer(format!("{e}")))?;
-        if let Some(cb) = reporter { cb(2, "Step 2: Complete."); }
-        if let Some(cb) = reporter { cb(2, "Step 3: Running inference..."); }
-        let context = WgpuContext::new().await.map_err(|e| PipelineError::Other(format!("{e}")))?;
-        let tokens = tokenizer.encode(prompt).map_err(|e| PipelineError::Tokenizer(format!("{e}")))?;
-        let token_id = tokens[0] as usize;
-        let pos = 0;
-        let mut kv_caches = vec![KVCache::default(); model.layers.len()];
-        let result = model.forward(&context, token_id, pos, &mut kv_caches).await
-            .map_err(|e| PipelineError::Inference(format!("{e}")))?;
-        let logits = result;
-        if let Some(cb) = reporter { cb(2, "Step 3: Complete."); }
-        // Timing reporting can be added similarly if needed
-        // Validate output
-        if logits.len() != model.config.vocab_size {
-            return Err(PipelineError::Inference("Logits vector has incorrect size".to_string()));
+        match self.backend {
+            PipelineBackend::Cpu => {
+                // --- Pure Rust, multi-threaded CPU inference path ---
+                let settings = self.settings.clone().unwrap_or_default();
+                if settings.threads > 0 {
+                    let _ = ThreadPoolBuilder::new().num_threads(settings.threads).build_global();
+                }
+                if let Some(cb) = reporter { cb(2, "Step 1: Loading model..."); }
+                // Load config
+                let config_path = self.model_dir.join(crate::constants::CONFIG_JSON);
+                let config_str = std::fs::read_to_string(&config_path).map_err(|e| PipelineError::ModelFile(format!("{e}")))?;
+                let hf_config: serde_json::Value = serde_json::from_str(&config_str).map_err(|e| PipelineError::ModelFile(format!("{e}")))?;
+                let model_config = crate::model::ModelConfig {
+                    hidden_size: hf_config["hidden_size"].as_u64().unwrap() as usize,
+                    intermediate_size: hf_config["intermediate_size"].as_u64().unwrap() as usize,
+                    num_hidden_layers: hf_config["num_hidden_layers"].as_u64().unwrap() as usize,
+                    num_attention_heads: hf_config["num_attention_heads"].as_u64().unwrap() as usize,
+                    num_key_value_heads: hf_config["num_key_value_heads"].as_u64().unwrap() as usize,
+                    vocab_size: hf_config["vocab_size"].as_u64().unwrap() as usize,
+                    max_seq_len: 4096,
+                    rms_norm_eps: hf_config["rms_norm_eps"].as_f64().unwrap() as f32,
+                    dropout: 0.0,
+                };
+                let mut model = crate::model::Transformer::from_dir(&self.converted_dir, model_config)
+                    .map_err(|e| PipelineError::ModelLoad(format!("{e}")))?;
+                if let Some(cb) = reporter { cb(2, "Step 1: Complete."); }
+                if let Some(cb) = reporter { cb(2, "Step 2: Loading tokenizer..."); }
+                let tokenizer_path = self.model_dir.join("tokenizer.json");
+                let tokenizer = crate::tokenizer::Tokenizer::from_file(tokenizer_path.to_str().unwrap())
+                    .map_err(|e| PipelineError::Tokenizer(format!("{e}")))?;
+                if let Some(cb) = reporter { cb(2, "Step 2: Complete."); }
+                if let Some(cb) = reporter { cb(2, "Step 3: Running inference..."); }
+                let tokens = tokenizer.encode(prompt).map_err(|e| PipelineError::Tokenizer(format!("{e}")))?;
+                let token_id = tokens[0] as usize;
+                let pos = 0;
+                let mut kv_caches = vec![crate::attention::KVCache::default(); model.layers.len()];
+                // --- Pure Rust CPU forward pass (to be implemented in model.rs) ---
+                let logits = model.cpu_forward(token_id, pos, &mut kv_caches)?;
+                if let Some(cb) = reporter { cb(2, "Step 3: Complete."); }
+                if logits.len() != model.config.vocab_size {
+                    return Err(PipelineError::Inference("Logits vector has incorrect size".to_string()));
+                }
+                if !logits.iter().all(|&l| l.is_finite()) {
+                    return Err(PipelineError::Inference("Logits contain NaN or Infinity".to_string()));
+                }
+                let (top_token_id, top_logit) = logits.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).unwrap();
+                let top_token = tokenizer.decode(&[top_token_id as u32]).unwrap_or("<UNK>".to_string());
+                Ok(PipelineResult {
+                    logits: logits.clone(),
+                    top_token,
+                    top_token_id,
+                    top_logit: *top_logit,
+                })
+            }
+            PipelineBackend::Gpu => {
+                // TODO: Call explicit GPU path (as before)
+                unimplemented!("Explicit GPU inference not yet implemented");
+            }
+            PipelineBackend::Auto => {
+                // Try GPU, fall back to CPU if buffer allocation fails
+                // TODO: Implement fallback logic
+                unimplemented!("Auto backend selection not yet implemented");
+            }
         }
-        if !logits.iter().all(|&l| l.is_finite()) {
-            return Err(PipelineError::Inference("Logits contain NaN or Infinity".to_string()));
-        }
-        let (top_token_id, top_logit) = logits.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).unwrap();
-        let top_token = tokenizer.decode(&[top_token_id as u32]).unwrap_or("<UNK>".to_string());
-        Ok(PipelineResult {
-            logits: logits.clone(),
-            top_token,
-            top_token_id,
-            top_logit: *top_logit,
-        })
     }
 } 

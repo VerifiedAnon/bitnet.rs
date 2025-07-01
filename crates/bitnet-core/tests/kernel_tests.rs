@@ -2062,10 +2062,15 @@ fn cross_device_consistency_test() {
                     }
                 };
 
+                let features = adapter.features();
+                let adapter_info = info.clone();
+                let limits = device.limits();
                 let context = WgpuContext {
                     device: Arc::new(device),
                     queue: Arc::new(queue),
-                    features: adapter.features(),
+                    features,
+                    adapter_info,
+                    limits,
                 };
 
                 let shader_source = include_str!("../src/kernels/bitnet_kernel.wgsl");

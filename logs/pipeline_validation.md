@@ -1,27 +1,19 @@
 # PIPELINE_VALIDATION Test Report
 
-> Generated on: 2025-07-01 00:29:47
+> Generated on: 2025-07-01 17:14:15
 
 ## Test Results
 
 | No. | Test Name | Status | Time Taken | Error Message |
 |:---:|:----------|:------:|:----------:|:-------------|
+|  1 | Pipeline Creation                                  | ✅ Pass |    0.00 ms |             |
 
 <details>
 <summary>📝 View Full Log Dump</summary>
 
 ```
-[2025-07-01, 00:28:13.654] -> Step 1: Downloading/Verifying original model files...
-[2025-07-01, 00:28:14.307] -> Step 1: Complete.
-[2025-07-01, 00:28:14.307] -> Step 2: Converting model to BitNet format...
-[2025-07-01, 00:28:14.308] -> Step 2: Complete.
-[2025-07-01, 00:28:14.308] -> Step 3: Running inference...
-[2025-07-01, 00:28:14.308] -> Step 1: Loading model...
-[2025-07-01, 00:29:38.338] -> Step 1: Complete.
-[2025-07-01, 00:29:38.339] -> Step 2: Loading tokenizer...
-[2025-07-01, 00:29:39.861] -> Step 2: Complete.
-[2025-07-01, 00:29:39.862] -> Step 3: Running inference...
-[2025-07-01, 00:29:47.075] -> Step 3: Complete.
+[2025-07-01, 17:14:15.382] -> [MEMORY] Used system memory before pipeline: 27935965184 KB
+[2025-07-01, 17:14:15.383] -> Pipeline::new succeeded
 ```
 
 </details>
@@ -31,9 +23,14 @@
 
 ### Test Statistics
 
-- **Total Tests:** 0
-- **Passed:** 0
+- **Total Tests:** 1
+- **Passed:** 1
 - **Failed:** 0
+
+### Timing Information
+
+- **Total Time:** 0.00 sec
+- **Average Time:** 0.00 ms
 
 ### Status
 

@@ -47,10 +47,13 @@ half = "2"
 memmap2 = "0.9"
 chrono = "0.4"
 lazy_static = "1.4.0"
+rayon = "1.8.1"
 
 [dev-dependencies]
 serial_test = "3.2.0"
 rayon = "1.8.1"
+tempfile = "3"
+sysinfo = "0.30"
 
 [features]
 default = ["gpu"]
