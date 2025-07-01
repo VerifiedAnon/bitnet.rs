@@ -1,51 +1,12 @@
 //! Feed-forward network implementation for BitNet.
 //!
 //! This module provides the feed-forward network (FFN) used in BitNet's transformer blocks.
-//! The implementation follows the standard transformer FFN architecture with:
-//! - Two quantized linear layers
-//! - GELU activation function
-//! - Efficient memory layout and computation
-//!
-//! # Architecture
-//!
-//! The feed-forward network consists of:
-//! ```text
-//! Input [hidden_size]
-//!   ↓
-//! Linear(hidden_size → intermediate_size)  [w1]
-//!   ↓
-//! GELU activation
-//!   ↓
-//! Linear(intermediate_size → hidden_size)  [w2]
-//!   ↓
-//! Output [hidden_size]
-//! ```
-//!
-//! # Examples
-//!
-//! ```rust
-//! use bitnet_core::feed_forward::{FeedForward, FeedForwardConfig};
-//!
-//! let config = FeedForwardConfig::new(
-//!     hidden_size: 1024,       // Model dimension
-//!     intermediate_size: 4096,  // Expansion size
-//! );
-//!
-//! let ffn = config.init();
-//! let input = vec![0.0; 1024];
-//! let output = ffn.forward(&input);
-//! ```
-//!
-//! # Performance
-//!
-//! The implementation is optimized for both CPU and GPU:
-//! - Uses quantized weights in both linear layers
-//! - Efficient GELU approximation
-//! - Memory-friendly data layout
-//! - GPU-accelerated matrix operations
+//! As per the "BitNet b1.58" paper, this FFN uses two linear layers and
+//! a Squared ReLU activation function.
 
 use crate::bitnet_linear::BitLinear;
 use crate::wgpu_context::WgpuContext;
+use bitnet_converter::packer::BitLinearRecord;
 
 /// Configuration for a feed-forward network.
 ///
@@ -59,7 +20,7 @@ use crate::wgpu_context::WgpuContext;
 ///
 /// let config = FeedForwardConfig::new(
 ///     hidden_size: 1024,       // Model dimension
-///     intermediate_size: 4096,  // Expansion size (typically 4x hidden)
+///     intermediate_size: 4096,  // Expansion size
 /// );
 /// ```
 #[derive(Debug, Clone)]
@@ -70,12 +31,15 @@ pub struct FeedForwardConfig {
     pub intermediate_size: usize,
 }
 
-/// A feed-forward network layer.
+/// A feed-forward network layer using Squared ReLU.
+///
+/// This layer consists of two `BitLinear` projections with a
+/// `ReLU^2` activation in between.
 #[derive(Clone)]
 pub struct FeedForward {
-    /// First linear layer (hidden → intermediate)
+    /// First linear layer (hidden -> intermediate)
     w1: BitLinear,
-    /// Second linear layer (intermediate → hidden)
+    /// Second linear layer (intermediate -> hidden)
     w2: BitLinear,
 }
 
@@ -111,36 +75,36 @@ impl FeedForwardConfig {
     ///
     /// # Implementation Notes
     ///
-    /// Currently initializes with zero weights. In practice, weights
+    /// Currently initializes with default BitLinear records. In practice, weights
     /// will be loaded from a pretrained model.
     pub fn init(&self) -> FeedForward {
-        let w1_weights = vec![vec![0i8; self.intermediate_size]; self.hidden_size];
-        let w2_weights = vec![vec![0i8; self.hidden_size]; self.intermediate_size];
-
-        FeedForward {
-            w1: BitLinear::new(w1_weights, self.hidden_size, self.intermediate_size),
-            w2: BitLinear::new(w2_weights, self.intermediate_size, self.hidden_size),
-        }
+        let w1_packed_len = (self.intermediate_size * self.hidden_size + 15) / 16;
+        let w2_packed_len = (self.hidden_size * self.intermediate_size + 15) / 16;
+        let w1 = BitLinear::from_record(BitLinearRecord {
+            packed_weights: vec![0; w1_packed_len],
+            weight_scales: vec![1.0; self.intermediate_size],
+            in_features: self.hidden_size,
+            out_features: self.intermediate_size,
+        });
+        let w2 = BitLinear::from_record(BitLinearRecord {
+            packed_weights: vec![0; w2_packed_len],
+            weight_scales: vec![1.0; self.hidden_size],
+            in_features: self.intermediate_size,
+            out_features: self.hidden_size,
+        });
+        FeedForward { w1, w2 }
     }
 }
 
 impl FeedForward {
-    /// Creates a new feed-forward network from this configuration.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Feed-forward network configuration
-    ///
-    /// # Returns
-    ///
-    /// * New feed-forward network
-    pub fn new(config: FeedForwardConfig) -> Self {
-        let w1_weights = vec![vec![0i8; config.intermediate_size]; config.hidden_size];
-        let w2_weights = vec![vec![0i8; config.hidden_size]; config.intermediate_size];
-
+    /// Creates a new FeedForward layer from pre-processed records.
+    /// NOTE: The BitNet b1.58 paper mentions using two linear layers for the FFN,
+    /// not the three-layer SwiGLU structure. The converter packs a `w13` for SwiGLU,
+    /// which we will treat as just `w1` for this architecture.
+    pub fn from_records(w1_record: BitLinearRecord, w2_record: BitLinearRecord) -> Self {
         Self {
-            w1: BitLinear::new(w1_weights, config.hidden_size, config.intermediate_size),
-            w2: BitLinear::new(w2_weights, config.intermediate_size, config.hidden_size),
+            w1: BitLinear::from_record(w1_record),
+            w2: BitLinear::from_record(w2_record),
         }
     }
 
@@ -173,50 +137,29 @@ impl FeedForward {
     ///
     /// The forward pass:
     /// 1. Project to intermediate size (w1)
-    /// 2. Apply GELU activation
+    /// 2. Apply ReLU^2 activation
     /// 3. Project back to hidden size (w2)
     pub async fn forward(&self, context: &WgpuContext, x: &[f32], batch_size: usize) -> Vec<f32> {
         let x1 = self.w1.forward(context, x, batch_size).await;
-        let x2 = gelu(&x1);
+        let x2 = relu_squared(&x1);
         self.w2.forward(context, &x2, batch_size).await
     }
 }
 
-/// Computes the GELU activation function.
+/// Computes the Squared ReLU activation function: `max(0, x)^2`.
 ///
-/// This is an efficient approximation of the Gaussian Error Linear Unit:
-/// GELU(x) = 0.5x * (1 + tanh(√(2/π) * (x + 0.044715x³)))
+/// This activation is used in the BitNet b1.58 architecture's FFN layers.
 ///
 /// # Arguments
-///
 /// * `x` - Input values
 ///
 /// # Returns
-///
-/// * GELU-activated values
-///
-/// # Examples
-///
-/// ```rust
-/// use bitnet_core::feed_forward::gelu;
-///
-/// let x = vec![0.0, 1.0, -1.0];
-/// let activated = gelu(&x);
-/// ```
-///
-/// # Implementation Notes
-///
-/// Uses a simpler approximation for efficiency:
-/// GELU(x) ≈ 0.5x * (1 + tanh(x/√2))
-///
-/// The error in this approximation is small enough for
-/// practical use in transformer models.
-fn gelu(x: &[f32]) -> Vec<f32> {
+/// * Activated values
+fn relu_squared(x: &[f32]) -> Vec<f32> {
     x.iter()
-        .map(|&x| {
-            let sqrt_2_over_pi = 0.7978845608028654;
-            let coef = sqrt_2_over_pi * (x + 0.044715 * x.powi(3));
-            0.5 * x * (1.0 + f32::tanh(coef))
+        .map(|&val| {
+            let relu_val = val.max(0.0);
+            relu_val * relu_val
         })
         .collect()
 }
@@ -224,44 +167,49 @@ fn gelu(x: &[f32]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
 
     #[test]
     fn test_ffn_config() {
         let config = FeedForwardConfig::new(1024, 4096);
-        assert_eq!(config.hidden_size, 1024);
-        assert_eq!(config.intermediate_size, 4096);
-    }
-
-    #[tokio::test]
-    async fn test_ffn_dimensions() {
-        let context = WgpuContext::new().await.unwrap();
-        let config = FeedForwardConfig::new(1024, 4096);
         let ffn = config.init();
-        let input = vec![0.0; 1024];
-        let output = ffn.forward(&context, &input, 1).await;
-        assert_eq!(output.len(), 1024);
+        assert_eq!(ffn.w1.in_features, 1024);
+        assert_eq!(ffn.w1.out_features, 4096);
+        assert_eq!(ffn.w2.in_features, 4096);
+        assert_eq!(ffn.w2.out_features, 1024);
     }
 
     #[test]
-    fn test_gelu() {
-        let input = vec![-1.0, 0.0, 1.0];
-        let activated = gelu(&input);
-        assert_eq!(activated.len(), 3);
-        assert!(activated[0] < 0.0); // GELU(-1) < 0
-        assert_eq!(activated[1], 0.0); // GELU(0) = 0
-        assert!(activated[2] > 0.0); // GELU(1) > 0
+    fn test_relu_squared() {
+        let input = vec![-2.0, -1.0, 0.0, 1.0, 2.0, 3.0];
+        let activated = relu_squared(&input);
+        // Expected: 0, 0, 0, 1*1, 2*2, 3*3
+        let expected = vec![0.0, 0.0, 0.0, 1.0, 4.0, 9.0];
+        assert_eq!(activated, expected);
     }
+    
+    #[test]
+    fn test_feed_forward_pass_dimensions() {
+        let context = block_on(crate::wgpu_context::WgpuContext::new()).unwrap();
+        
+        let hidden_size = 128;
+        let intermediate_size = 256;
+        let batch_size = 2;
+        let seq_len = 10;
+        
+        let config = FeedForwardConfig::new(hidden_size, intermediate_size);
+        let ffn = config.init();
 
-    #[tokio::test]
-    async fn test_feed_forward() {
-        let ffn = FeedForward::new(FeedForwardConfig {
-            hidden_size: 1024,
-            intermediate_size: 4096,
-        });
+        let input_len = batch_size * seq_len * hidden_size;
+        let input = vec![0.1; input_len];
 
-        let context = WgpuContext::new().await.unwrap();
-        let input = vec![1.0; 1024];
-        let output = ffn.forward(&context, &input, 1).await;
-        assert_eq!(output.len(), 1024);
+        // The input to the FFN is typically processed per-token, so the effective batch size
+        // for the linear layers is `batch_size * seq_len`.
+        let effective_batch_size = batch_size * seq_len;
+
+        let output = block_on(ffn.forward(&context, &input, effective_batch_size));
+
+        // The output should have the same dimensions as the input.
+        assert_eq!(output.len(), input_len);
     }
 }

@@ -1,54 +1,54 @@
 # KERNEL_TESTS Test Report
 
-> Generated on: 2025-06-30 19:31:39
+> Generated on: 2025-06-30 20:32:01
 
 ## Test Results
 
 | No. | Test Name | Status | Time Taken | Error Message |
 |:---:|:----------|:------:|:----------:|:-------------|
-|  1 | Bitlinear Layer Forward Pass (OPTIMAL)             | ✅ Pass |  755.00 ms |             |
-|  2 | Bitlinear Layer Forward Pass (SAFE)                | ✅ Pass |  771.00 ms |             |
-|  3 | GPU Kernel Dimensions (OPTIMAL)                    | ✅ Pass |  415.00 ms |             |
-|  4 | GPU Kernel Dimensions (SAFE)                       | ✅ Pass |  410.00 ms |             |
-|  5 | Kernel All Minus One Weights Test (OPTIMAL)        | ✅ Pass |  406.00 ms |             |
-|  6 | Kernel All Minus One Weights Test (SAFE)           | ✅ Pass |  407.00 ms |             |
-|  7 | Kernel All Plus One Weights Test (OPTIMAL)         | ✅ Pass |  418.00 ms |             |
-|  8 | Kernel All Plus One Weights Test (SAFE)            | ✅ Pass |  421.00 ms |             |
-|  9 | Kernel All Zero Test (OPTIMAL)                     | ✅ Pass |  418.00 ms |             |
-| 10 | Kernel All Zero Test (SAFE)                        | ✅ Pass |  405.00 ms |             |
-| 11 | Kernel Large Batch Test (OPTIMAL)                  | ✅ Pass |  421.00 ms |             |
-| 12 | Kernel Large Batch Test (SAFE)                     | ✅ Pass |  456.00 ms |             |
-| 13 | Kernel Non Divisible Batch Test (OPTIMAL)          | ✅ Pass |  398.00 ms |             |
-| 14 | Kernel Non Divisible Batch Test (SAFE)             | ✅ Pass |  390.00 ms |             |
-| 15 | Low Level Kernel Correctness Test (OPTIMAL)        | ✅ Pass |  472.00 ms |             |
-| 16 | Low Level Kernel Correctness Test (SAFE)           | ✅ Pass |  420.00 ms |             |
-| 17 | Performance Benchmark GPU Vs Scalar (OPTIMAL)      | ✅ Pass |  574.00 ms |             |
-| 18 | Performance Benchmark GPU Vs Scalar (SAFE)         | ✅ Pass |  538.00 ms |             |
-| 19 | Precision Test Fp Edge Cases (OPTIMAL)             | ✅ Pass |  396.00 ms |             |
-| 20 | Precision Test Fp Edge Cases (SAFE)                | ✅ Pass |  427.00 ms |             |
-| 21 | Stress Test Maximum Dimension Support (OPTIMAL)    | ✅ Pass |   2.44 sec |             |
-| 22 | Stress Test Maximum Dimension Support (SAFE)       | ✅ Pass |   2.42 sec |             |
-| 23 | Cross Device Consistency Test                      | ✅ Pass |  24.68 sec |             |
+|  1 | Bitlinear Layer Forward Pass (OPTIMAL)             | ✅ Pass |  733.00 ms |             |
+|  2 | Bitlinear Layer Forward Pass (SAFE)                | ✅ Pass |  770.00 ms |             |
+|  3 | GPU Kernel Dimensions (OPTIMAL)                    | ✅ Pass |  409.00 ms |             |
+|  4 | GPU Kernel Dimensions (SAFE)                       | ✅ Pass |  428.00 ms |             |
+|  5 | Kernel All Minus One Weights Test (OPTIMAL)        | ✅ Pass |  402.00 ms |             |
+|  6 | Kernel All Minus One Weights Test (SAFE)           | ✅ Pass |  432.00 ms |             |
+|  7 | Kernel All Plus One Weights Test (OPTIMAL)         | ✅ Pass |  402.00 ms |             |
+|  8 | Kernel All Plus One Weights Test (SAFE)            | ✅ Pass |  444.00 ms |             |
+|  9 | Kernel All Zero Test (OPTIMAL)                     | ✅ Pass |  422.00 ms |             |
+| 10 | Kernel All Zero Test (SAFE)                        | ✅ Pass |  440.00 ms |             |
+| 11 | Kernel Large Batch Test (OPTIMAL)                  | ✅ Pass |  426.00 ms |             |
+| 12 | Kernel Large Batch Test (SAFE)                     | ✅ Pass |  429.00 ms |             |
+| 13 | Kernel Non Divisible Batch Test (OPTIMAL)          | ✅ Pass |  452.00 ms |             |
+| 14 | Kernel Non Divisible Batch Test (SAFE)             | ✅ Pass |  383.00 ms |             |
+| 15 | Low Level Kernel Correctness Test (OPTIMAL)        | ✅ Pass |  447.00 ms |             |
+| 16 | Low Level Kernel Correctness Test (SAFE)           | ✅ Pass |  403.00 ms |             |
+| 17 | Performance Benchmark GPU Vs Scalar (OPTIMAL)      | ✅ Pass |  558.00 ms |             |
+| 18 | Performance Benchmark GPU Vs Scalar (SAFE)         | ✅ Pass |  557.00 ms |             |
+| 19 | Precision Test Fp Edge Cases (OPTIMAL)             | ✅ Pass |  436.00 ms |             |
+| 20 | Precision Test Fp Edge Cases (SAFE)                | ✅ Pass |  423.00 ms |             |
+| 21 | Stress Test Maximum Dimension Support (OPTIMAL)    | ✅ Pass |   2.39 sec |             |
+| 22 | Stress Test Maximum Dimension Support (SAFE)       | ✅ Pass |   2.40 sec |             |
+| 23 | Cross Device Consistency Test                      | ✅ Pass |  24.55 sec |             |
 | 24 | Kernel All Minus One Weights Test Warm             | ✅ Pass |    3.00 ms |             |
 | 25 | Kernel All Plus One Weights Test Warm              | ✅ Pass |    3.00 ms |             |
-| 26 | Kernel All Zero Test Warm                          | ✅ Pass |    2.00 ms |             |
+| 26 | Kernel All Zero Test Warm                          | ✅ Pass |    3.00 ms |             |
 | 27 | Kernel Large Batch Test Warm                       | ✅ Pass |    3.00 ms |             |
 | 28 | Kernel Non Divisible Batch Test Warm               | ✅ Pass |    3.00 ms |             |
 | 29 | Low Level Kernel Correctness Test Warm             | ✅ Pass |   12.00 ms |             |
 | 30 | Memory Safety Buffer Overflow Test Warm            | ✅ Pass |    0.00 ms |             |
-| 31 | Memory Safety Hardcoded Large Allocation Test      | ✅ Pass |  368.00 ms |             |
+| 31 | Memory Safety Hardcoded Large Allocation Test      | ✅ Pass |  378.00 ms |             |
 | 32 | Memory Safety Hardcoded Large Allocation Test Warm | ✅ Pass |    0.00 ms |             |
-| 33 | Performance Benchmark GPU Vs Scalar Large Batch    | ✅ Pass |   4.28 sec |             |
+| 33 | Performance Benchmark GPU Vs Scalar Large Batch    | ✅ Pass |   4.34 sec |             |
 | 34 | Performance Benchmark GPU Vs Scalar Warm           | ✅ Pass |  154.00 ms |             |
 | 35 | Precision Test Fp Edge Cases Warm                  | ✅ Pass |    2.00 ms |             |
-| 36 | Streaming Load Test                                | ✅ Pass |  417.00 ms |             |
-| 37 | Streaming Load Test Warm                           | ✅ Pass |   14.00 ms |             |
+| 36 | Streaming Load Test                                | ✅ Pass |  419.00 ms |             |
+| 37 | Streaming Load Test Warm                           | ✅ Pass |   16.00 ms |             |
 | 38 | Stress Test Maximum Dimension Support Warm         | ✅ Pass |   2.06 sec |             |
-| 39 | Basic GPU Buffer Operations                        | ✅ Pass |  618.00 ms |             |
+| 39 | Basic GPU Buffer Operations                        | ✅ Pass |  614.00 ms |             |
 | 40 | Bitlinear Layer Forward Pass Warm                  | ✅ Pass |  359.00 ms |             |
 | 41 | GPU Kernel Dimensions Warm                         | ✅ Pass |    2.00 ms |             |
 | 42 | Scalar Packing Decoding Symmetry                   | ✅ Pass |    0.00 ms |             |
-| 43 | Unit Test Pack Ternary Weights                     | ✅ Pass |    0.00 ms |             |
+| 43 | Unit Test Pack Ternary Weights                     | ✅ Pass |    2.00 ms |             |
 
 ## ⭐ Special Finding
 
@@ -60,404 +60,404 @@ This report shows each test run with both the SAFE (bitnet_kernel.wgsl) and OPTI
 <summary>📝 View Full Log Dump</summary>
 
 ```
-[2025-06-30, 19:25:41.701] -> Packed value check: Expected=0b00100100100100100100100100100100, Got=0b00100100100100100100100100100100
-[2025-06-30, 19:25:41.701] -> unit_test_pack_ternary_weights passed.
-[2025-06-30, 19:25:41.706] -> Testing basic GPU operations...
-[2025-06-30, 19:25:42.299] -> Test data: [1.0, 2.0, 3.0, 4.0]
-[2025-06-30, 19:25:42.325] -> Read-back data: [1.0, 2.0, 3.0, 4.0]
-[2025-06-30, 19:25:42.325] -> Basic GPU operations test passed!
-[2025-06-30, 19:25:43.189] -> Running correctness logic with dims: batch=4, in=16, out=8 (SAFE)
-[2025-06-30, 19:25:43.553] -> Running correctness logic with dims: batch=4, in=16, out=8
-[2025-06-30, 19:25:43.577] -> [Profile] Buffer Setup: 23.37ms
-[2025-06-30, 19:25:43.577] -> [Profile] Bind Group Setup: 220.40µs
-[2025-06-30, 19:25:43.578] -> [Profile] Dispatch & Submit: 619.60µs
-[2025-06-30, 19:25:43.578] -> [Profile] Readback (map/poll/copy): 214.80µs
-[2025-06-30, 19:25:43.578] -> [Profile] Total launch_gpu_kernel Time: 25.05ms
-[2025-06-30, 19:25:43.579] -> Correctness test comparison: GPU[..4]=[0.5789151, -0.6329472, -2.0069058, 1.8216529], Scalar[..4]=[0.5789151, -0.6329472, -2.0069058, 1.8216529]
-[2025-06-30, 19:25:43.609] -> low_level_kernel_correctness_test passed.
-[2025-06-30, 19:27:26.059] -> Running correctness logic with dims: batch=4, in=16, out=8 (OPTIMAL)
-[2025-06-30, 19:27:26.487] -> Running correctness logic with dims: batch=4, in=16, out=8
-[2025-06-30, 19:27:26.497] -> [Profile] Buffer Setup: 8.93ms
-[2025-06-30, 19:27:26.497] -> [Profile] Bind Group Setup: 175.90µs
-[2025-06-30, 19:27:26.498] -> [Profile] Dispatch & Submit: 693.80µs
-[2025-06-30, 19:27:26.498] -> [Profile] Readback (map/poll/copy): 104.00µs
-[2025-06-30, 19:27:26.498] -> [Profile] Total launch_gpu_kernel Time: 10.69ms
-[2025-06-30, 19:27:26.499] -> Correctness test comparison: GPU[..4]=[0.5789151, -0.6329472, -2.0069058, 1.8216529], Scalar[..4]=[0.5789151, -0.6329472, -2.0069058, 1.8216529]
-[2025-06-30, 19:27:26.531] -> low_level_kernel_correctness_test passed.
-[2025-06-30, 19:29:09.532] -> Running correctness logic with dims: batch=4, in=16, out=8
-[2025-06-30, 19:29:09.542] -> [Profile] Buffer Setup: 9.00ms
-[2025-06-30, 19:29:09.542] -> [Profile] Bind Group Setup: 194.30µs
-[2025-06-30, 19:29:09.543] -> [Profile] Dispatch & Submit: 653.90µs
-[2025-06-30, 19:29:09.543] -> [Profile] Readback (map/poll/copy): 136.60µs
-[2025-06-30, 19:29:09.544] -> [Profile] Total launch_gpu_kernel Time: 10.85ms
-[2025-06-30, 19:29:09.544] -> Correctness test comparison: GPU[..4]=[0.5789151, -0.6329472, -2.0069058, 1.8216529], Scalar[..4]=[0.5789151, -0.6329472, -2.0069058, 1.8216529]
-[2025-06-30, 19:30:23.515] -> Running correctness logic with dims: batch=4, in=16, out=8
-[2025-06-30, 19:30:23.524] -> [Profile] Buffer Setup: 8.97ms
-[2025-06-30, 19:30:23.524] -> [Profile] Bind Group Setup: 206.60µs
-[2025-06-30, 19:30:23.525] -> [Profile] Dispatch & Submit: 619.20µs
-[2025-06-30, 19:30:23.526] -> [Profile] Readback (map/poll/copy): 198.30µs
-[2025-06-30, 19:30:23.526] -> [Profile] Total launch_gpu_kernel Time: 10.86ms
-[2025-06-30, 19:30:23.527] -> Correctness test comparison: GPU[..4]=[0.5789151, -0.6329472, -2.0069058, 1.8216529], Scalar[..4]=[0.5789151, -0.6329472, -2.0069058, 1.8216529]
-[2025-06-30, 19:25:43.611] -> Running test_gpu_kernel_dimensions... (SAFE)
-[2025-06-30, 19:25:43.989] -> [Profile] Buffer Setup: 11.02ms
-[2025-06-30, 19:25:43.990] -> [Profile] Bind Group Setup: 239.60µs
-[2025-06-30, 19:25:43.991] -> [Profile] Dispatch & Submit: 549.60µs
-[2025-06-30, 19:25:43.991] -> [Profile] Readback (map/poll/copy): 89.80µs
-[2025-06-30, 19:25:43.991] -> [Profile] Total launch_gpu_kernel Time: 12.56ms
-[2025-06-30, 19:25:44.021] -> test_gpu_kernel_dimensions passed.
-[2025-06-30, 19:27:26.533] -> Running test_gpu_kernel_dimensions... (OPTIMAL)
-[2025-06-30, 19:27:26.918] -> [Profile] Buffer Setup: 10.23ms
-[2025-06-30, 19:27:26.918] -> [Profile] Bind Group Setup: 229.10µs
-[2025-06-30, 19:27:26.919] -> [Profile] Dispatch & Submit: 591.60µs
-[2025-06-30, 19:27:26.919] -> [Profile] Readback (map/poll/copy): 142.70µs
-[2025-06-30, 19:27:26.920] -> [Profile] Total launch_gpu_kernel Time: 11.94ms
-[2025-06-30, 19:27:26.949] -> test_gpu_kernel_dimensions passed.
-[2025-06-30, 19:29:09.546] -> [Profile] Buffer Setup: 973.60µs
-[2025-06-30, 19:29:09.546] -> [Profile] Bind Group Setup: 126.60µs
-[2025-06-30, 19:29:09.547] -> [Profile] Dispatch & Submit: 339.60µs
-[2025-06-30, 19:29:09.547] -> [Profile] Readback (map/poll/copy): 72.50µs
-[2025-06-30, 19:29:09.547] -> [Profile] Total launch_gpu_kernel Time: 2.16ms
-[2025-06-30, 19:30:23.528] -> [Profile] Buffer Setup: 907.20µs
-[2025-06-30, 19:30:23.528] -> [Profile] Bind Group Setup: 99.20µs
-[2025-06-30, 19:30:23.529] -> [Profile] Dispatch & Submit: 311.70µs
-[2025-06-30, 19:30:23.529] -> [Profile] Readback (map/poll/copy): 167.00µs
-[2025-06-30, 19:30:23.529] -> [Profile] Total launch_gpu_kernel Time: 2.00ms
-[2025-06-30, 19:25:44.024] -> Running kernel_large_batch_test... (SAFE)
-[2025-06-30, 19:25:44.428] -> [Profile] Buffer Setup: 22.88ms
-[2025-06-30, 19:25:44.429] -> [Profile] Bind Group Setup: 194.60µs
-[2025-06-30, 19:25:44.429] -> [Profile] Dispatch & Submit: 560.80µs
-[2025-06-30, 19:25:44.429] -> [Profile] Readback (map/poll/copy): 93.70µs
-[2025-06-30, 19:25:44.430] -> [Profile] Total launch_gpu_kernel Time: 24.42ms
-[2025-06-30, 19:25:44.480] -> kernel_large_batch_test passed.
-[2025-06-30, 19:27:26.953] -> Running kernel_large_batch_test... (OPTIMAL)
-[2025-06-30, 19:27:27.346] -> [Profile] Buffer Setup: 11.04ms
-[2025-06-30, 19:27:27.346] -> [Profile] Bind Group Setup: 231.10µs
-[2025-06-30, 19:27:27.347] -> [Profile] Dispatch & Submit: 591.60µs
-[2025-06-30, 19:27:27.347] -> [Profile] Readback (map/poll/copy): 89.70µs
-[2025-06-30, 19:27:27.347] -> [Profile] Total launch_gpu_kernel Time: 12.70ms
-[2025-06-30, 19:27:27.374] -> kernel_large_batch_test passed.
-[2025-06-30, 19:29:09.550] -> [Profile] Buffer Setup: 890.60µs
-[2025-06-30, 19:29:09.550] -> [Profile] Bind Group Setup: 104.50µs
-[2025-06-30, 19:29:09.550] -> [Profile] Dispatch & Submit: 213.80µs
-[2025-06-30, 19:29:09.551] -> [Profile] Readback (map/poll/copy): 123.30µs
-[2025-06-30, 19:29:09.551] -> [Profile] Total launch_gpu_kernel Time: 2.00ms
-[2025-06-30, 19:30:23.532] -> [Profile] Buffer Setup: 873.90µs
-[2025-06-30, 19:30:23.532] -> [Profile] Bind Group Setup: 79.60µs
-[2025-06-30, 19:30:23.532] -> [Profile] Dispatch & Submit: 245.00µs
-[2025-06-30, 19:30:23.532] -> [Profile] Readback (map/poll/copy): 106.40µs
-[2025-06-30, 19:30:23.533] -> [Profile] Total launch_gpu_kernel Time: 1.91ms
-[2025-06-30, 19:25:44.483] -> Running kernel_all_zero_test... (SAFE)
-[2025-06-30, 19:25:44.854] -> [Profile] Buffer Setup: 8.62ms
-[2025-06-30, 19:25:44.854] -> [Profile] Bind Group Setup: 179.50µs
-[2025-06-30, 19:25:44.855] -> [Profile] Dispatch & Submit: 639.30µs
-[2025-06-30, 19:25:44.855] -> [Profile] Readback (map/poll/copy): 121.60µs
-[2025-06-30, 19:25:44.856] -> [Profile] Total launch_gpu_kernel Time: 10.23ms
-[2025-06-30, 19:25:44.888] -> kernel_all_zero_test passed.
-[2025-06-30, 19:27:27.375] -> Running kernel_all_zero_test... (OPTIMAL)
-[2025-06-30, 19:27:27.740] -> [Profile] Buffer Setup: 8.56ms
-[2025-06-30, 19:27:27.741] -> [Profile] Bind Group Setup: 244.50µs
-[2025-06-30, 19:27:27.742] -> [Profile] Dispatch & Submit: 519.10µs
-[2025-06-30, 19:27:27.742] -> [Profile] Readback (map/poll/copy): 90.70µs
-[2025-06-30, 19:27:27.742] -> [Profile] Total launch_gpu_kernel Time: 10.15ms
-[2025-06-30, 19:27:27.793] -> kernel_all_zero_test passed.
-[2025-06-30, 19:29:09.553] -> [Profile] Buffer Setup: 885.70µs
-[2025-06-30, 19:29:09.553] -> [Profile] Bind Group Setup: 129.80µs
-[2025-06-30, 19:29:09.554] -> [Profile] Dispatch & Submit: 342.20µs
-[2025-06-30, 19:29:09.554] -> [Profile] Readback (map/poll/copy): 172.30µs
-[2025-06-30, 19:29:09.554] -> [Profile] Total launch_gpu_kernel Time: 2.07ms
-[2025-06-30, 19:30:23.535] -> [Profile] Buffer Setup: 791.50µs
-[2025-06-30, 19:30:23.535] -> [Profile] Bind Group Setup: 109.10µs
-[2025-06-30, 19:30:23.535] -> [Profile] Dispatch & Submit: 255.00µs
-[2025-06-30, 19:30:23.536] -> [Profile] Readback (map/poll/copy): 86.30µs
-[2025-06-30, 19:30:23.536] -> [Profile] Total launch_gpu_kernel Time: 1.84ms
-[2025-06-30, 19:25:44.892] -> Running kernel_all_plus_one_weights_test... (SAFE)
-[2025-06-30, 19:25:45.281] -> [Profile] Buffer Setup: 8.97ms
-[2025-06-30, 19:25:45.282] -> [Profile] Bind Group Setup: 252.60µs
-[2025-06-30, 19:25:45.282] -> [Profile] Dispatch & Submit: 549.70µs
-[2025-06-30, 19:25:45.283] -> [Profile] Readback (map/poll/copy): 102.20µs
-[2025-06-30, 19:25:45.283] -> [Profile] Total launch_gpu_kernel Time: 10.52ms
-[2025-06-30, 19:25:45.313] -> kernel_all_plus_one_weights_test passed.
-[2025-06-30, 19:27:27.798] -> Running kernel_all_plus_one_weights_test... (OPTIMAL)
-[2025-06-30, 19:27:28.188] -> [Profile] Buffer Setup: 8.85ms
-[2025-06-30, 19:27:28.189] -> [Profile] Bind Group Setup: 246.40µs
-[2025-06-30, 19:27:28.190] -> [Profile] Dispatch & Submit: 612.10µs
-[2025-06-30, 19:27:28.190] -> [Profile] Readback (map/poll/copy): 87.00µs
-[2025-06-30, 19:27:28.190] -> [Profile] Total launch_gpu_kernel Time: 10.50ms
-[2025-06-30, 19:27:28.216] -> kernel_all_plus_one_weights_test passed.
-[2025-06-30, 19:29:09.556] -> [Profile] Buffer Setup: 781.60µs
-[2025-06-30, 19:29:09.557] -> [Profile] Bind Group Setup: 96.10µs
-[2025-06-30, 19:29:09.557] -> [Profile] Dispatch & Submit: 217.90µs
-[2025-06-30, 19:29:09.557] -> [Profile] Readback (map/poll/copy): 124.70µs
-[2025-06-30, 19:29:09.557] -> [Profile] Total launch_gpu_kernel Time: 1.82ms
-[2025-06-30, 19:30:23.538] -> [Profile] Buffer Setup: 800.90µs
-[2025-06-30, 19:30:23.538] -> [Profile] Bind Group Setup: 77.30µs
-[2025-06-30, 19:30:23.539] -> [Profile] Dispatch & Submit: 380.90µs
-[2025-06-30, 19:30:23.539] -> [Profile] Readback (map/poll/copy): 90.60µs
-[2025-06-30, 19:30:23.539] -> [Profile] Total launch_gpu_kernel Time: 2.08ms
-[2025-06-30, 19:25:45.316] -> Running kernel_all_minus_one_weights_test... (SAFE)
-[2025-06-30, 19:25:45.692] -> [Profile] Buffer Setup: 10.04ms
-[2025-06-30, 19:25:45.692] -> [Profile] Bind Group Setup: 234.60µs
-[2025-06-30, 19:25:45.693] -> [Profile] Dispatch & Submit: 485.60µs
-[2025-06-30, 19:25:45.693] -> [Profile] Readback (map/poll/copy): 84.10µs
-[2025-06-30, 19:25:45.693] -> [Profile] Total launch_gpu_kernel Time: 11.57ms
-[2025-06-30, 19:25:45.723] -> kernel_all_minus_one_weights_test passed.
-[2025-06-30, 19:27:28.218] -> Running kernel_all_minus_one_weights_test... (OPTIMAL)
-[2025-06-30, 19:27:28.595] -> [Profile] Buffer Setup: 8.73ms
-[2025-06-30, 19:27:28.595] -> [Profile] Bind Group Setup: 247.70µs
-[2025-06-30, 19:27:28.596] -> [Profile] Dispatch & Submit: 627.30µs
-[2025-06-30, 19:27:28.596] -> [Profile] Readback (map/poll/copy): 89.40µs
-[2025-06-30, 19:27:28.596] -> [Profile] Total launch_gpu_kernel Time: 10.36ms
-[2025-06-30, 19:27:28.625] -> kernel_all_minus_one_weights_test passed.
-[2025-06-30, 19:29:09.560] -> [Profile] Buffer Setup: 906.00µs
-[2025-06-30, 19:29:09.560] -> [Profile] Bind Group Setup: 121.60µs
-[2025-06-30, 19:29:09.561] -> [Profile] Dispatch & Submit: 441.50µs
-[2025-06-30, 19:29:09.561] -> [Profile] Readback (map/poll/copy): 174.60µs
-[2025-06-30, 19:29:09.561] -> [Profile] Total launch_gpu_kernel Time: 2.52ms
-[2025-06-30, 19:30:23.541] -> [Profile] Buffer Setup: 1.01ms
-[2025-06-30, 19:30:23.542] -> [Profile] Bind Group Setup: 111.60µs
-[2025-06-30, 19:30:23.542] -> [Profile] Dispatch & Submit: 266.40µs
-[2025-06-30, 19:30:23.542] -> [Profile] Readback (map/poll/copy): 171.00µs
-[2025-06-30, 19:30:23.543] -> [Profile] Total launch_gpu_kernel Time: 2.24ms
-[2025-06-30, 19:25:45.727] -> Running kernel_non_divisible_batch_test... (SAFE)
-[2025-06-30, 19:25:46.086] -> [Profile] Buffer Setup: 11.11ms
-[2025-06-30, 19:25:46.087] -> [Profile] Bind Group Setup: 231.90µs
-[2025-06-30, 19:25:46.087] -> [Profile] Dispatch & Submit: 493.80µs
-[2025-06-30, 19:25:46.087] -> [Profile] Readback (map/poll/copy): 94.30µs
-[2025-06-30, 19:25:46.088] -> [Profile] Total launch_gpu_kernel Time: 12.59ms
-[2025-06-30, 19:25:46.116] -> kernel_non_divisible_batch_test passed.
-[2025-06-30, 19:27:28.626] -> Running kernel_non_divisible_batch_test... (OPTIMAL)
-[2025-06-30, 19:27:28.995] -> [Profile] Buffer Setup: 10.44ms
-[2025-06-30, 19:27:28.996] -> [Profile] Bind Group Setup: 234.50µs
-[2025-06-30, 19:27:28.997] -> [Profile] Dispatch & Submit: 621.60µs
-[2025-06-30, 19:27:28.997] -> [Profile] Readback (map/poll/copy): 87.40µs
-[2025-06-30, 19:27:28.997] -> [Profile] Total launch_gpu_kernel Time: 12.16ms
-[2025-06-30, 19:27:29.025] -> kernel_non_divisible_batch_test passed.
-[2025-06-30, 19:29:09.564] -> [Profile] Buffer Setup: 862.90µs
-[2025-06-30, 19:29:09.564] -> [Profile] Bind Group Setup: 105.50µs
-[2025-06-30, 19:29:09.564] -> [Profile] Dispatch & Submit: 324.30µs
-[2025-06-30, 19:29:09.564] -> [Profile] Readback (map/poll/copy): 80.40µs
-[2025-06-30, 19:29:09.565] -> [Profile] Total launch_gpu_kernel Time: 2.00ms
-[2025-06-30, 19:30:23.545] -> [Profile] Buffer Setup: 861.90µs
-[2025-06-30, 19:30:23.545] -> [Profile] Bind Group Setup: 121.80µs
-[2025-06-30, 19:30:23.546] -> [Profile] Dispatch & Submit: 496.80µs
-[2025-06-30, 19:30:23.546] -> [Profile] Readback (map/poll/copy): 103.30µs
-[2025-06-30, 19:30:23.547] -> [Profile] Total launch_gpu_kernel Time: 2.40ms
-[2025-06-30, 19:25:46.119] -> Running test_bitlinear_layer_forward_pass... (SAFE)
-[2025-06-30, 19:25:46.891] -> test_bitlinear_layer_forward_pass passed.
-[2025-06-30, 19:27:29.027] -> Running test_bitlinear_layer_forward_pass... (OPTIMAL)
-[2025-06-30, 19:27:29.782] -> test_bitlinear_layer_forward_pass passed.
-[2025-06-30, 19:25:46.893] -> Running performance_benchmark_gpu_vs_scalar... (SAFE)
-[2025-06-30, 19:25:47.432] -> performance_benchmark_gpu_vs_scalar passed.
-[2025-06-30, 19:27:29.783] -> Running performance_benchmark_gpu_vs_scalar... (OPTIMAL)
-[2025-06-30, 19:27:30.357] -> performance_benchmark_gpu_vs_scalar passed.
-[2025-06-30, 19:25:47.435] -> Running precision_test_fp_edge_cases... (SAFE)
-[2025-06-30, 19:25:47.862] -> precision_test_fp_edge_cases passed.
-[2025-06-30, 19:25:47.867] -> Starting cross-device consistency test...
-[2025-06-30, 19:25:47.867] -> Calculating scalar reference result...
-[2025-06-30, 19:25:47.868] -> Scalar reference calculation complete.
-[2025-06-30, 19:25:48.114] -> Found 5 adapters. Running per-device subtests.
-[2025-06-30, 19:25:48.114] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER" ("Vulkan")
-[2025-06-30, 19:25:48.209] -> [Profile] Buffer Setup: 9.03ms
-[2025-06-30, 19:25:48.210] -> [Profile] Bind Group Setup: 203.50µs
-[2025-06-30, 19:25:48.211] -> [Profile] Dispatch & Submit: 571.10µs
-[2025-06-30, 19:25:48.211] -> [Profile] Readback (map/poll/copy): 238.40µs
-[2025-06-30, 19:25:48.211] -> [Profile] Total launch_gpu_kernel Time: 10.75ms
-[2025-06-30, 19:25:48.238] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER" ("Vulkan")
-[2025-06-30, 19:25:48.238] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
-[2025-06-30, 19:26:00.164] -> [Profile] Buffer Setup: 9.50ms
-[2025-06-30, 19:26:00.164] -> [Profile] Bind Group Setup: 233.80µs
-[2025-06-30, 19:26:00.167] -> [Profile] Dispatch & Submit: 2.78ms
-[2025-06-30, 19:26:00.170] -> [Profile] Readback (map/poll/copy): 2.32ms
-[2025-06-30, 19:26:00.170] -> [Profile] Total launch_gpu_kernel Time: 15.48ms
-[2025-06-30, 19:26:00.201] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
-[2025-06-30, 19:26:00.202] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
-[2025-06-30, 19:26:12.097] -> [Profile] Buffer Setup: 9.74ms
-[2025-06-30, 19:26:12.098] -> [Profile] Bind Group Setup: 212.30µs
-[2025-06-30, 19:26:12.101] -> [Profile] Dispatch & Submit: 2.83ms
-[2025-06-30, 19:26:12.103] -> [Profile] Readback (map/poll/copy): 2.22ms
-[2025-06-30, 19:26:12.103] -> [Profile] Total launch_gpu_kernel Time: 15.71ms
-[2025-06-30, 19:26:12.134] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
-[2025-06-30, 19:26:12.134] -> SUBTEST: Running on "Microsoft Basic Render Driver" ("Dx12")
-[2025-06-30, 19:26:12.135] -> SKIPPING: Microsoft Basic Render Driver ("Dx12")
-[2025-06-30, 19:26:12.135] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER/PCIe/SSE2" ("OpenGL")
-[2025-06-30, 19:26:12.158] -> [Profile] Buffer Setup: 1.41ms
-[2025-06-30, 19:26:12.158] -> [Profile] Bind Group Setup: 89.60µs
-[2025-06-30, 19:26:12.161] -> [Profile] Dispatch & Submit: 2.04ms
-[2025-06-30, 19:26:12.165] -> [Profile] Readback (map/poll/copy): 3.73ms
-[2025-06-30, 19:26:12.165] -> [Profile] Total launch_gpu_kernel Time: 8.05ms
-[2025-06-30, 19:26:12.168] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER/PCIe/SSE2" ("OpenGL")
-[2025-06-30, 19:26:12.168] -> Cross-device consistency test PASSED on all tested devices.
-[2025-06-30, 19:27:30.362] -> Running precision_test_fp_edge_cases... (OPTIMAL)
-[2025-06-30, 19:27:30.759] -> precision_test_fp_edge_cases passed.
-[2025-06-30, 19:27:30.761] -> Starting cross-device consistency test...
-[2025-06-30, 19:27:30.762] -> Calculating scalar reference result...
-[2025-06-30, 19:27:30.762] -> Scalar reference calculation complete.
-[2025-06-30, 19:27:31.016] -> Found 5 adapters. Running per-device subtests.
-[2025-06-30, 19:27:31.016] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER" ("Vulkan")
-[2025-06-30, 19:27:31.125] -> [Profile] Buffer Setup: 10.61ms
-[2025-06-30, 19:27:31.126] -> [Profile] Bind Group Setup: 249.80µs
-[2025-06-30, 19:27:31.126] -> [Profile] Dispatch & Submit: 686.50µs
-[2025-06-30, 19:27:31.127] -> [Profile] Readback (map/poll/copy): 176.70µs
-[2025-06-30, 19:27:31.127] -> [Profile] Total launch_gpu_kernel Time: 12.56ms
-[2025-06-30, 19:27:31.158] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER" ("Vulkan")
-[2025-06-30, 19:27:31.159] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
-[2025-06-30, 19:27:43.265] -> [Profile] Buffer Setup: 10.00ms
-[2025-06-30, 19:27:43.266] -> [Profile] Bind Group Setup: 146.60µs
-[2025-06-30, 19:27:43.269] -> [Profile] Dispatch & Submit: 2.77ms
-[2025-06-30, 19:27:43.271] -> [Profile] Readback (map/poll/copy): 2.28ms
-[2025-06-30, 19:27:43.271] -> [Profile] Total launch_gpu_kernel Time: 15.88ms
-[2025-06-30, 19:27:43.304] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
-[2025-06-30, 19:27:43.304] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
-[2025-06-30, 19:27:55.373] -> [Profile] Buffer Setup: 9.60ms
-[2025-06-30, 19:27:55.373] -> [Profile] Bind Group Setup: 204.30µs
-[2025-06-30, 19:27:55.376] -> [Profile] Dispatch & Submit: 2.62ms
-[2025-06-30, 19:27:55.379] -> [Profile] Readback (map/poll/copy): 2.18ms
-[2025-06-30, 19:27:55.379] -> [Profile] Total launch_gpu_kernel Time: 15.29ms
-[2025-06-30, 19:27:55.415] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
-[2025-06-30, 19:27:55.416] -> SUBTEST: Running on "Microsoft Basic Render Driver" ("Dx12")
-[2025-06-30, 19:27:55.416] -> SKIPPING: Microsoft Basic Render Driver ("Dx12")
-[2025-06-30, 19:27:55.417] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER/PCIe/SSE2" ("OpenGL")
-[2025-06-30, 19:27:55.439] -> [Profile] Buffer Setup: 1.52ms
-[2025-06-30, 19:27:55.439] -> [Profile] Bind Group Setup: 86.90µs
-[2025-06-30, 19:27:55.441] -> [Profile] Dispatch & Submit: 1.44ms
-[2025-06-30, 19:27:55.442] -> [Profile] Readback (map/poll/copy): 1.41ms
-[2025-06-30, 19:27:55.443] -> [Profile] Total launch_gpu_kernel Time: 5.10ms
-[2025-06-30, 19:27:55.444] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER/PCIe/SSE2" ("OpenGL")
-[2025-06-30, 19:27:55.444] -> Cross-device consistency test PASSED on all tested devices.
-[2025-06-30, 19:26:12.243] -> Running streaming_load_test...
-[2025-06-30, 19:26:12.660] -> streaming_load_test passed.
-[2025-06-30, 19:27:55.526] -> Running streaming_load_test...
-[2025-06-30, 19:27:55.943] -> streaming_load_test passed.
-[2025-06-30, 19:25:47.832] -> [Profile] Buffer Setup: 9.34ms
-[2025-06-30, 19:25:47.833] -> [Profile] Bind Group Setup: 238.20µs
-[2025-06-30, 19:25:47.834] -> [Profile] Dispatch & Submit: 699.80µs
-[2025-06-30, 19:25:47.834] -> [Profile] Readback (map/poll/copy): 89.50µs
-[2025-06-30, 19:25:47.834] -> [Profile] Total launch_gpu_kernel Time: 11.01ms
-[2025-06-30, 19:27:30.730] -> [Profile] Buffer Setup: 8.71ms
-[2025-06-30, 19:27:30.731] -> [Profile] Bind Group Setup: 239.40µs
-[2025-06-30, 19:27:30.732] -> [Profile] Dispatch & Submit: 636.20µs
-[2025-06-30, 19:27:30.732] -> [Profile] Readback (map/poll/copy): 91.40µs
-[2025-06-30, 19:27:30.732] -> [Profile] Total launch_gpu_kernel Time: 10.43ms
-[2025-06-30, 19:29:10.074] -> [Profile] Buffer Setup: 834.30µs
-[2025-06-30, 19:29:10.075] -> [Profile] Bind Group Setup: 74.60µs
-[2025-06-30, 19:29:10.075] -> [Profile] Dispatch & Submit: 238.80µs
-[2025-06-30, 19:29:10.075] -> [Profile] Readback (map/poll/copy): 93.50µs
-[2025-06-30, 19:29:10.075] -> [Profile] Total launch_gpu_kernel Time: 1.87ms
-[2025-06-30, 19:30:24.063] -> [Profile] Buffer Setup: 857.10µs
-[2025-06-30, 19:30:24.063] -> [Profile] Bind Group Setup: 84.90µs
-[2025-06-30, 19:30:24.064] -> [Profile] Dispatch & Submit: 238.80µs
-[2025-06-30, 19:30:24.064] -> [Profile] Readback (map/poll/copy): 73.10µs
-[2025-06-30, 19:30:24.064] -> [Profile] Total launch_gpu_kernel Time: 1.85ms
-[2025-06-30, 19:25:42.364] -> Successfully caught invalid weight value (2) as a Result::Err.
-[2025-06-30, 19:25:42.364] -> Successfully caught invalid weight value (-2) as a Result::Err.
-[2025-06-30, 19:26:12.664] -> Running memory_safety_hardcoded_large_allocation_test... (SAFE)
-[2025-06-30, 19:26:13.035] -> memory_safety_hardcoded_large_allocation_test passed.
-[2025-06-30, 19:27:55.945] -> Running memory_safety_hardcoded_large_allocation_test... (OPTIMAL)
-[2025-06-30, 19:27:56.314] -> memory_safety_hardcoded_large_allocation_test passed.
-[2025-06-30, 19:29:10.091] -> [WARM] Successfully caught expected error for 10GB allocation: Requested buffer size (10737418240 bytes) exceeds device limits.
-[2025-06-30, 19:30:24.080] -> [WARM] Successfully caught expected error for 10GB allocation: Requested buffer size (10737418240 bytes) exceeds device limits.
-[2025-06-30, 19:26:13.038] -> Running stress_test_maximum_dimension_support... (SAFE)
-[2025-06-30, 19:26:14.237] -> [Profile] Buffer Setup: 17.46ms
-[2025-06-30, 19:26:14.237] -> [Profile] Bind Group Setup: 276.20µs
-[2025-06-30, 19:26:14.238] -> [Profile] Dispatch & Submit: 680.20µs
-[2025-06-30, 19:26:14.330] -> [Profile] Readback (map/poll/copy): 91.57ms
-[2025-06-30, 19:26:14.330] -> [Profile] Total launch_gpu_kernel Time: 110.81ms
-[2025-06-30, 19:26:15.454] -> stress_test_maximum_dimension_support passed.
-[2025-06-30, 19:27:56.319] -> Running stress_test_maximum_dimension_support... (OPTIMAL)
-[2025-06-30, 19:27:57.511] -> [Profile] Buffer Setup: 17.75ms
-[2025-06-30, 19:27:57.511] -> [Profile] Bind Group Setup: 269.00µs
-[2025-06-30, 19:27:57.512] -> [Profile] Dispatch & Submit: 610.80µs
-[2025-06-30, 19:27:57.605] -> [Profile] Readback (map/poll/copy): 92.97ms
-[2025-06-30, 19:27:57.605] -> [Profile] Total launch_gpu_kernel Time: 112.40ms
-[2025-06-30, 19:27:58.760] -> stress_test_maximum_dimension_support passed.
-[2025-06-30, 19:29:10.091] -> [WARM] Successfully caught expected error: Requested buffer size (268435520 bytes) exceeds device limits.
-[2025-06-30, 19:29:10.923] -> [Profile] Buffer Setup: 10.60ms
-[2025-06-30, 19:29:10.924] -> [Profile] Bind Group Setup: 221.10µs
-[2025-06-30, 19:29:10.924] -> [Profile] Dispatch & Submit: 495.30µs
-[2025-06-30, 19:29:11.016] -> [Profile] Readback (map/poll/copy): 91.35ms
-[2025-06-30, 19:29:11.016] -> [Profile] Total launch_gpu_kernel Time: 103.65ms
-[2025-06-30, 19:30:24.080] -> [WARM] Successfully caught expected error: Requested buffer size (268435520 bytes) exceeds device limits.
-[2025-06-30, 19:30:24.924] -> [Profile] Buffer Setup: 10.71ms
-[2025-06-30, 19:30:24.924] -> [Profile] Bind Group Setup: 217.10µs
-[2025-06-30, 19:30:24.925] -> [Profile] Dispatch & Submit: 469.00µs
-[2025-06-30, 19:30:25.019] -> [Profile] Readback (map/poll/copy): 93.61ms
-[2025-06-30, 19:30:25.019] -> [Profile] Total launch_gpu_kernel Time: 105.84ms
-[2025-06-30, 19:25:42.754] -> WGPU context creation succeeded unexpectedly with impossible limits.
-[2025-06-30, 19:25:42.754] -> Requested limits: Limits { max_texture_dimension_1d: 8192, max_texture_dimension_2d: 8192, max_texture_dimension_3d: 2048, max_texture_array_layers: 256, max_bind_groups: 4, max_bindings_per_bind_group: 1000, max_dynamic_uniform_buffers_per_pipeline_layout: 8, max_dynamic_storage_buffers_per_pipeline_layout: 4, max_sampled_textures_per_shader_stage: 16, max_samplers_per_shader_stage: 16, max_storage_buffers_per_shader_stage: 8, max_storage_textures_per_shader_stage: 4, max_uniform_buffers_per_shader_stage: 12, max_binding_array_elements_per_shader_stage: 0, max_binding_array_sampler_elements_per_shader_stage: 0, max_uniform_buffer_binding_size: 65536, max_storage_buffer_binding_size: 134217728, max_vertex_buffers: 8, max_buffer_size: 1, max_vertex_attributes: 16, max_vertex_buffer_array_stride: 2048, min_uniform_buffer_offset_alignment: 256, min_storage_buffer_offset_alignment: 256, max_inter_stage_shader_components: 60, max_color_attachments: 8, max_color_attachment_bytes_per_sample: 32, max_compute_workgroup_storage_size: 16384, max_compute_invocations_per_workgroup: 256, max_compute_workgroup_size_x: 256, max_compute_workgroup_size_y: 256, max_compute_workgroup_size_z: 64, max_compute_workgroups_per_dimension: 65535, min_subgroup_size: 0, max_subgroup_size: 0, max_push_constant_size: 0, max_non_sampler_bindings: 1000000 }
-[2025-06-30, 19:25:42.755] -> Actual device limits returned: Limits { max_texture_dimension_1d: 8192, max_texture_dimension_2d: 8192, max_texture_dimension_3d: 2048, max_texture_array_layers: 256, max_bind_groups: 4, max_bindings_per_bind_group: 1000, max_dynamic_uniform_buffers_per_pipeline_layout: 8, max_dynamic_storage_buffers_per_pipeline_layout: 4, max_sampled_textures_per_shader_stage: 16, max_samplers_per_shader_stage: 16, max_storage_buffers_per_shader_stage: 8, max_storage_textures_per_shader_stage: 4, max_uniform_buffers_per_shader_stage: 12, max_binding_array_elements_per_shader_stage: 0, max_binding_array_sampler_elements_per_shader_stage: 0, max_uniform_buffer_binding_size: 65536, max_storage_buffer_binding_size: 134217728, max_vertex_buffers: 8, max_buffer_size: 1, max_vertex_attributes: 16, max_vertex_buffer_array_stride: 2048, min_uniform_buffer_offset_alignment: 256, min_storage_buffer_offset_alignment: 256, max_inter_stage_shader_components: 60, max_color_attachments: 8, max_color_attachment_bytes_per_sample: 32, max_compute_workgroup_storage_size: 16384, max_compute_invocations_per_workgroup: 256, max_compute_workgroup_size_x: 256, max_compute_workgroup_size_y: 256, max_compute_workgroup_size_z: 64, max_compute_workgroups_per_dimension: 65535, min_subgroup_size: 0, max_subgroup_size: 0, max_push_constant_size: 0, max_non_sampler_bindings: 1000000 }
-[2025-06-30, 19:25:43.187] -> Testing scalar packing-decoding symmetry...
-[2025-06-30, 19:25:43.187] -> Original weights:  [-1, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1, 0]
-[2025-06-30, 19:25:43.188] -> Decoded weights:   [-1, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1, 0]
-[2025-06-30, 19:25:43.188] -> Scalar packing-decoding symmetry test passed.
-[2025-06-30, 19:25:41.698] -> STARTING KERNEL TEST SUITE
-[2025-06-30, 19:25:43.188] -> --- STARTING COLD RUN (SAFE) ---
-[2025-06-30, 19:25:43.188] -> [KERNEL] Using shader: ../src/kernels/bitnet_kernel.wgsl
-[2025-06-30, 19:27:26.058] -> --- STARTING COLD RUN (OPTIMAL) ---
-[2025-06-30, 19:27:26.059] -> [KERNEL] Using shader: ../src/kernels/bitnet_kernel_optimal.wgsl
-[2025-06-30, 19:29:09.134] -> --- STARTING WARM RUN (SAFE) ---
-[2025-06-30, 19:29:09.134] -> [KERNEL] Using shader: ../src/kernels/bitnet_kernel.wgsl
-[2025-06-30, 19:30:23.123] -> --- STARTING WARM RUN (OPTIMAL) ---
-[2025-06-30, 19:30:23.123] -> [KERNEL] Using shader: ../src/kernels/bitnet_kernel_optimal.wgsl
-[2025-06-30, 19:29:09.544] -> [WARM] low_level_kernel_correctness_test passed. (SAFE)
-[2025-06-30, 19:30:23.527] -> [WARM] low_level_kernel_correctness_test passed. (OPTIMAL)
-[2025-06-30, 19:29:09.547] -> [WARM] test_gpu_kernel_dimensions passed. (SAFE)
-[2025-06-30, 19:30:23.529] -> [WARM] test_gpu_kernel_dimensions passed. (OPTIMAL)
-[2025-06-30, 19:29:09.551] -> [WARM] kernel_large_batch_test passed. (SAFE)
-[2025-06-30, 19:30:23.533] -> [WARM] kernel_large_batch_test passed. (OPTIMAL)
-[2025-06-30, 19:25:44.856] -> kernel_all_zero_test passed.
-[2025-06-30, 19:27:27.742] -> kernel_all_zero_test passed.
-[2025-06-30, 19:29:09.555] -> [WARM] kernel_all_zero_test passed. (SAFE)
-[2025-06-30, 19:30:23.536] -> [WARM] kernel_all_zero_test passed. (OPTIMAL)
-[2025-06-30, 19:25:45.283] -> kernel_all_plus_one_weights_test passed.
-[2025-06-30, 19:27:28.190] -> kernel_all_plus_one_weights_test passed.
-[2025-06-30, 19:29:09.558] -> [WARM] kernel_all_plus_one_weights_test passed. (SAFE)
-[2025-06-30, 19:30:23.540] -> [WARM] kernel_all_plus_one_weights_test passed. (OPTIMAL)
-[2025-06-30, 19:25:45.694] -> kernel_all_minus_one_weights_test passed.
-[2025-06-30, 19:27:28.597] -> kernel_all_minus_one_weights_test passed.
-[2025-06-30, 19:29:09.562] -> [WARM] kernel_all_minus_one_weights_test passed. (SAFE)
-[2025-06-30, 19:30:23.543] -> [WARM] kernel_all_minus_one_weights_test passed. (OPTIMAL)
-[2025-06-30, 19:25:46.088] -> kernel_non_divisible_batch_test passed.
-[2025-06-30, 19:27:28.998] -> kernel_non_divisible_batch_test passed.
-[2025-06-30, 19:29:09.565] -> [WARM] kernel_non_divisible_batch_test passed. (SAFE)
-[2025-06-30, 19:30:23.547] -> [WARM] kernel_non_divisible_batch_test passed. (OPTIMAL)
-[2025-06-30, 19:29:09.921] -> [WARM] test_bitlinear_layer_forward_pass passed. (SAFE)
-[2025-06-30, 19:30:23.907] -> [WARM] test_bitlinear_layer_forward_pass passed. (OPTIMAL)
-[2025-06-30, 19:29:10.073] -> [WARM] Performance Benchmark (100 iterations, 64 batch, 32 in, 16 out):
-  GPU (Wall Time):    Avg: 1.398ms    | Total: 139.810ms 
-  Scalar (CPU Time):  Avg: 107.814µs  | Total: 10.781ms  
+[2025-06-30, 20:26:03.468] -> Packed value check: Expected=0b10010010010010010010010010010010, Got=0b10010010010010010010010010010010
+[2025-06-30, 20:26:03.470] -> unit_test_pack_ternary_weights passed.
+[2025-06-30, 20:26:03.474] -> Testing basic GPU operations...
+[2025-06-30, 20:26:04.065] -> Test data: [1.0, 2.0, 3.0, 4.0]
+[2025-06-30, 20:26:04.088] -> Read-back data: [1.0, 2.0, 3.0, 4.0]
+[2025-06-30, 20:26:04.088] -> Basic GPU operations test passed!
+[2025-06-30, 20:26:04.985] -> Running correctness logic with dims: batch=4, in=16, out=8 (SAFE)
+[2025-06-30, 20:26:05.337] -> Running correctness logic with dims: batch=4, in=16, out=8
+[2025-06-30, 20:26:05.358] -> [Profile] Buffer Setup: 21.39ms
+[2025-06-30, 20:26:05.359] -> [Profile] Bind Group Setup: 231.50µs
+[2025-06-30, 20:26:05.360] -> [Profile] Dispatch & Submit: 609.80µs
+[2025-06-30, 20:26:05.360] -> [Profile] Readback (map/poll/copy): 218.60µs
+[2025-06-30, 20:26:05.360] -> [Profile] Total launch_gpu_kernel Time: 23.11ms
+[2025-06-30, 20:26:05.361] -> Correctness test comparison: GPU[..4]=[0.71785474, 2.2384717, 1.7676208, -0.8876698], Scalar[..4]=[0.71785474, 2.2384717, 1.7676208, -0.8876698]
+[2025-06-30, 20:26:05.388] -> low_level_kernel_correctness_test passed.
+[2025-06-30, 20:27:47.309] -> Running correctness logic with dims: batch=4, in=16, out=8 (OPTIMAL)
+[2025-06-30, 20:27:47.719] -> Running correctness logic with dims: batch=4, in=16, out=8
+[2025-06-30, 20:27:47.728] -> [Profile] Buffer Setup: 8.83ms
+[2025-06-30, 20:27:47.728] -> [Profile] Bind Group Setup: 177.10µs
+[2025-06-30, 20:27:47.729] -> [Profile] Dispatch & Submit: 588.00µs
+[2025-06-30, 20:27:47.730] -> [Profile] Readback (map/poll/copy): 131.90µs
+[2025-06-30, 20:27:47.730] -> [Profile] Total launch_gpu_kernel Time: 10.46ms
+[2025-06-30, 20:27:47.730] -> Correctness test comparison: GPU[..4]=[0.71785474, 2.2384717, 1.7676208, -0.8876698], Scalar[..4]=[0.71785474, 2.2384717, 1.7676208, -0.8876698]
+[2025-06-30, 20:27:47.757] -> low_level_kernel_correctness_test passed.
+[2025-06-30, 20:29:30.722] -> Running correctness logic with dims: batch=4, in=16, out=8
+[2025-06-30, 20:29:30.732] -> [Profile] Buffer Setup: 9.25ms
+[2025-06-30, 20:29:30.732] -> [Profile] Bind Group Setup: 219.90µs
+[2025-06-30, 20:29:30.733] -> [Profile] Dispatch & Submit: 673.90µs
+[2025-06-30, 20:29:30.734] -> [Profile] Readback (map/poll/copy): 366.50µs
+[2025-06-30, 20:29:30.734] -> [Profile] Total launch_gpu_kernel Time: 11.26ms
+[2025-06-30, 20:29:30.735] -> Correctness test comparison: GPU[..4]=[0.71785474, 2.2384717, 1.7676208, -0.8876698], Scalar[..4]=[0.71785474, 2.2384717, 1.7676208, -0.8876698]
+[2025-06-30, 20:30:44.987] -> Running correctness logic with dims: batch=4, in=16, out=8
+[2025-06-30, 20:30:44.996] -> [Profile] Buffer Setup: 9.36ms
+[2025-06-30, 20:30:44.997] -> [Profile] Bind Group Setup: 216.20µs
+[2025-06-30, 20:30:44.998] -> [Profile] Dispatch & Submit: 628.40µs
+[2025-06-30, 20:30:44.998] -> [Profile] Readback (map/poll/copy): 140.30µs
+[2025-06-30, 20:30:44.998] -> [Profile] Total launch_gpu_kernel Time: 11.22ms
+[2025-06-30, 20:30:44.999] -> Correctness test comparison: GPU[..4]=[0.71785474, 2.2384717, 1.7676208, -0.8876698], Scalar[..4]=[0.71785474, 2.2384717, 1.7676208, -0.8876698]
+[2025-06-30, 20:26:05.391] -> Running test_gpu_kernel_dimensions... (SAFE)
+[2025-06-30, 20:26:05.786] -> [Profile] Buffer Setup: 21.10ms
+[2025-06-30, 20:26:05.787] -> [Profile] Bind Group Setup: 237.90µs
+[2025-06-30, 20:26:05.788] -> [Profile] Dispatch & Submit: 560.30µs
+[2025-06-30, 20:26:05.788] -> [Profile] Readback (map/poll/copy): 99.50µs
+[2025-06-30, 20:26:05.788] -> [Profile] Total launch_gpu_kernel Time: 22.68ms
+[2025-06-30, 20:26:05.819] -> test_gpu_kernel_dimensions passed.
+[2025-06-30, 20:27:47.760] -> Running test_gpu_kernel_dimensions... (OPTIMAL)
+[2025-06-30, 20:27:48.140] -> [Profile] Buffer Setup: 10.23ms
+[2025-06-30, 20:27:48.140] -> [Profile] Bind Group Setup: 237.20µs
+[2025-06-30, 20:27:48.141] -> [Profile] Dispatch & Submit: 579.50µs
+[2025-06-30, 20:27:48.141] -> [Profile] Readback (map/poll/copy): 85.20µs
+[2025-06-30, 20:27:48.141] -> [Profile] Total launch_gpu_kernel Time: 11.81ms
+[2025-06-30, 20:27:48.170] -> test_gpu_kernel_dimensions passed.
+[2025-06-30, 20:29:30.736] -> [Profile] Buffer Setup: 895.10µs
+[2025-06-30, 20:29:30.736] -> [Profile] Bind Group Setup: 103.10µs
+[2025-06-30, 20:29:30.737] -> [Profile] Dispatch & Submit: 258.20µs
+[2025-06-30, 20:29:30.737] -> [Profile] Readback (map/poll/copy): 175.70µs
+[2025-06-30, 20:29:30.737] -> [Profile] Total launch_gpu_kernel Time: 2.08ms
+[2025-06-30, 20:30:45.000] -> [Profile] Buffer Setup: 872.50µs
+[2025-06-30, 20:30:45.000] -> [Profile] Bind Group Setup: 77.30µs
+[2025-06-30, 20:30:45.001] -> [Profile] Dispatch & Submit: 268.70µs
+[2025-06-30, 20:30:45.001] -> [Profile] Readback (map/poll/copy): 182.00µs
+[2025-06-30, 20:30:45.001] -> [Profile] Total launch_gpu_kernel Time: 1.92ms
+[2025-06-30, 20:26:05.822] -> Running kernel_large_batch_test... (SAFE)
+[2025-06-30, 20:26:06.221] -> [Profile] Buffer Setup: 8.82ms
+[2025-06-30, 20:26:06.222] -> [Profile] Bind Group Setup: 167.20µs
+[2025-06-30, 20:26:06.222] -> [Profile] Dispatch & Submit: 544.60µs
+[2025-06-30, 20:26:06.222] -> [Profile] Readback (map/poll/copy): 101.50µs
+[2025-06-30, 20:26:06.223] -> [Profile] Total launch_gpu_kernel Time: 10.32ms
+[2025-06-30, 20:26:06.251] -> kernel_large_batch_test passed.
+[2025-06-30, 20:27:48.171] -> Running kernel_large_batch_test... (OPTIMAL)
+[2025-06-30, 20:27:48.566] -> [Profile] Buffer Setup: 10.35ms
+[2025-06-30, 20:27:48.567] -> [Profile] Bind Group Setup: 167.10µs
+[2025-06-30, 20:27:48.568] -> [Profile] Dispatch & Submit: 642.50µs
+[2025-06-30, 20:27:48.568] -> [Profile] Readback (map/poll/copy): 91.90µs
+[2025-06-30, 20:27:48.568] -> [Profile] Total launch_gpu_kernel Time: 11.95ms
+[2025-06-30, 20:27:48.597] -> kernel_large_batch_test passed.
+[2025-06-30, 20:29:30.740] -> [Profile] Buffer Setup: 888.40µs
+[2025-06-30, 20:29:30.740] -> [Profile] Bind Group Setup: 81.30µs
+[2025-06-30, 20:29:30.740] -> [Profile] Dispatch & Submit: 250.40µs
+[2025-06-30, 20:29:30.741] -> [Profile] Readback (map/poll/copy): 73.00µs
+[2025-06-30, 20:29:30.741] -> [Profile] Total launch_gpu_kernel Time: 1.80ms
+[2025-06-30, 20:30:45.004] -> [Profile] Buffer Setup: 913.40µs
+[2025-06-30, 20:30:45.004] -> [Profile] Bind Group Setup: 115.30µs
+[2025-06-30, 20:30:45.005] -> [Profile] Dispatch & Submit: 248.80µs
+[2025-06-30, 20:30:45.005] -> [Profile] Readback (map/poll/copy): 74.70µs
+[2025-06-30, 20:30:45.005] -> [Profile] Total launch_gpu_kernel Time: 1.93ms
+[2025-06-30, 20:26:06.254] -> Running kernel_all_zero_test... (SAFE)
+[2025-06-30, 20:26:06.664] -> [Profile] Buffer Setup: 13.09ms
+[2025-06-30, 20:26:06.664] -> [Profile] Bind Group Setup: 165.00µs
+[2025-06-30, 20:26:06.665] -> [Profile] Dispatch & Submit: 567.00µs
+[2025-06-30, 20:26:06.665] -> [Profile] Readback (map/poll/copy): 97.90µs
+[2025-06-30, 20:26:06.665] -> [Profile] Total launch_gpu_kernel Time: 14.60ms
+[2025-06-30, 20:26:06.695] -> kernel_all_zero_test passed.
+[2025-06-30, 20:27:48.600] -> Running kernel_all_zero_test... (OPTIMAL)
+[2025-06-30, 20:27:48.974] -> [Profile] Buffer Setup: 8.91ms
+[2025-06-30, 20:27:48.975] -> [Profile] Bind Group Setup: 168.50µs
+[2025-06-30, 20:27:48.976] -> [Profile] Dispatch & Submit: 674.80µs
+[2025-06-30, 20:27:48.976] -> [Profile] Readback (map/poll/copy): 207.10µs
+[2025-06-30, 20:27:48.976] -> [Profile] Total launch_gpu_kernel Time: 10.74ms
+[2025-06-30, 20:27:49.022] -> kernel_all_zero_test passed.
+[2025-06-30, 20:29:30.743] -> [Profile] Buffer Setup: 849.40µs
+[2025-06-30, 20:29:30.743] -> [Profile] Bind Group Setup: 67.40µs
+[2025-06-30, 20:29:30.743] -> [Profile] Dispatch & Submit: 318.30µs
+[2025-06-30, 20:29:30.744] -> [Profile] Readback (map/poll/copy): 190.70µs
+[2025-06-30, 20:29:30.744] -> [Profile] Total launch_gpu_kernel Time: 2.16ms
+[2025-06-30, 20:30:45.007] -> [Profile] Buffer Setup: 822.70µs
+[2025-06-30, 20:30:45.007] -> [Profile] Bind Group Setup: 81.00µs
+[2025-06-30, 20:30:45.008] -> [Profile] Dispatch & Submit: 322.70µs
+[2025-06-30, 20:30:45.008] -> [Profile] Readback (map/poll/copy): 72.80µs
+[2025-06-30, 20:30:45.008] -> [Profile] Total launch_gpu_kernel Time: 1.93ms
+[2025-06-30, 20:26:06.697] -> Running kernel_all_plus_one_weights_test... (SAFE)
+[2025-06-30, 20:26:07.111] -> [Profile] Buffer Setup: 11.13ms
+[2025-06-30, 20:26:07.111] -> [Profile] Bind Group Setup: 188.80µs
+[2025-06-30, 20:26:07.112] -> [Profile] Dispatch & Submit: 548.20µs
+[2025-06-30, 20:26:07.112] -> [Profile] Readback (map/poll/copy): 108.20µs
+[2025-06-30, 20:26:07.112] -> [Profile] Total launch_gpu_kernel Time: 12.83ms
+[2025-06-30, 20:26:07.141] -> kernel_all_plus_one_weights_test passed.
+[2025-06-30, 20:27:49.024] -> Running kernel_all_plus_one_weights_test... (OPTIMAL)
+[2025-06-30, 20:27:49.395] -> [Profile] Buffer Setup: 11.69ms
+[2025-06-30, 20:27:49.395] -> [Profile] Bind Group Setup: 180.40µs
+[2025-06-30, 20:27:49.396] -> [Profile] Dispatch & Submit: 871.80µs
+[2025-06-30, 20:27:49.397] -> [Profile] Readback (map/poll/copy): 94.70µs
+[2025-06-30, 20:27:49.397] -> [Profile] Total launch_gpu_kernel Time: 13.60ms
+[2025-06-30, 20:27:49.426] -> kernel_all_plus_one_weights_test passed.
+[2025-06-30, 20:29:30.746] -> [Profile] Buffer Setup: 881.30µs
+[2025-06-30, 20:29:30.747] -> [Profile] Bind Group Setup: 99.30µs
+[2025-06-30, 20:29:30.747] -> [Profile] Dispatch & Submit: 285.10µs
+[2025-06-30, 20:29:30.748] -> [Profile] Readback (map/poll/copy): 228.80µs
+[2025-06-30, 20:29:30.748] -> [Profile] Total launch_gpu_kernel Time: 2.13ms
+[2025-06-30, 20:30:45.010] -> [Profile] Buffer Setup: 896.10µs
+[2025-06-30, 20:30:45.011] -> [Profile] Bind Group Setup: 178.60µs
+[2025-06-30, 20:30:45.011] -> [Profile] Dispatch & Submit: 247.40µs
+[2025-06-30, 20:30:45.011] -> [Profile] Readback (map/poll/copy): 169.00µs
+[2025-06-30, 20:30:45.012] -> [Profile] Total launch_gpu_kernel Time: 2.12ms
+[2025-06-30, 20:26:07.144] -> Running kernel_all_minus_one_weights_test... (SAFE)
+[2025-06-30, 20:26:07.521] -> [Profile] Buffer Setup: 12.50ms
+[2025-06-30, 20:26:07.522] -> [Profile] Bind Group Setup: 164.20µs
+[2025-06-30, 20:26:07.522] -> [Profile] Dispatch & Submit: 518.70µs
+[2025-06-30, 20:26:07.523] -> [Profile] Readback (map/poll/copy): 95.90µs
+[2025-06-30, 20:26:07.523] -> [Profile] Total launch_gpu_kernel Time: 13.97ms
+[2025-06-30, 20:26:07.577] -> kernel_all_minus_one_weights_test passed.
+[2025-06-30, 20:27:49.428] -> Running kernel_all_minus_one_weights_test... (OPTIMAL)
+[2025-06-30, 20:27:49.801] -> [Profile] Buffer Setup: 8.89ms
+[2025-06-30, 20:27:49.801] -> [Profile] Bind Group Setup: 169.70µs
+[2025-06-30, 20:27:49.802] -> [Profile] Dispatch & Submit: 664.40µs
+[2025-06-30, 20:27:49.802] -> [Profile] Readback (map/poll/copy): 92.00µs
+[2025-06-30, 20:27:49.803] -> [Profile] Total launch_gpu_kernel Time: 10.49ms
+[2025-06-30, 20:27:49.830] -> kernel_all_minus_one_weights_test passed.
+[2025-06-30, 20:29:30.750] -> [Profile] Buffer Setup: 815.50µs
+[2025-06-30, 20:29:30.750] -> [Profile] Bind Group Setup: 70.80µs
+[2025-06-30, 20:29:30.751] -> [Profile] Dispatch & Submit: 427.50µs
+[2025-06-30, 20:29:30.751] -> [Profile] Readback (map/poll/copy): 99.20µs
+[2025-06-30, 20:29:30.751] -> [Profile] Total launch_gpu_kernel Time: 2.24ms
+[2025-06-30, 20:30:45.014] -> [Profile] Buffer Setup: 829.10µs
+[2025-06-30, 20:30:45.014] -> [Profile] Bind Group Setup: 205.10µs
+[2025-06-30, 20:30:45.015] -> [Profile] Dispatch & Submit: 377.40µs
+[2025-06-30, 20:30:45.015] -> [Profile] Readback (map/poll/copy): 95.20µs
+[2025-06-30, 20:30:45.015] -> [Profile] Total launch_gpu_kernel Time: 2.34ms
+[2025-06-30, 20:26:07.579] -> Running kernel_non_divisible_batch_test... (SAFE)
+[2025-06-30, 20:26:07.932] -> [Profile] Buffer Setup: 8.62ms
+[2025-06-30, 20:26:07.933] -> [Profile] Bind Group Setup: 187.70µs
+[2025-06-30, 20:26:07.934] -> [Profile] Dispatch & Submit: 539.40µs
+[2025-06-30, 20:26:07.934] -> [Profile] Readback (map/poll/copy): 177.60µs
+[2025-06-30, 20:26:07.934] -> [Profile] Total launch_gpu_kernel Time: 10.30ms
+[2025-06-30, 20:26:07.962] -> kernel_non_divisible_batch_test passed.
+[2025-06-30, 20:27:49.832] -> Running kernel_non_divisible_batch_test... (OPTIMAL)
+[2025-06-30, 20:27:50.223] -> [Profile] Buffer Setup: 14.30ms
+[2025-06-30, 20:27:50.224] -> [Profile] Bind Group Setup: 168.90µs
+[2025-06-30, 20:27:50.225] -> [Profile] Dispatch & Submit: 698.20µs
+[2025-06-30, 20:27:50.225] -> [Profile] Readback (map/poll/copy): 92.10µs
+[2025-06-30, 20:27:50.225] -> [Profile] Total launch_gpu_kernel Time: 15.94ms
+[2025-06-30, 20:27:50.284] -> kernel_non_divisible_batch_test passed.
+[2025-06-30, 20:29:30.754] -> [Profile] Buffer Setup: 855.30µs
+[2025-06-30, 20:29:30.754] -> [Profile] Bind Group Setup: 78.70µs
+[2025-06-30, 20:29:30.754] -> [Profile] Dispatch & Submit: 297.40µs
+[2025-06-30, 20:29:30.755] -> [Profile] Readback (map/poll/copy): 192.10µs
+[2025-06-30, 20:29:30.755] -> [Profile] Total launch_gpu_kernel Time: 1.96ms
+[2025-06-30, 20:30:45.018] -> [Profile] Buffer Setup: 852.10µs
+[2025-06-30, 20:30:45.018] -> [Profile] Bind Group Setup: 74.20µs
+[2025-06-30, 20:30:45.019] -> [Profile] Dispatch & Submit: 387.60µs
+[2025-06-30, 20:30:45.019] -> [Profile] Readback (map/poll/copy): 179.10µs
+[2025-06-30, 20:30:45.019] -> [Profile] Total launch_gpu_kernel Time: 2.06ms
+[2025-06-30, 20:26:07.965] -> Running test_bitlinear_layer_forward_pass... (SAFE)
+[2025-06-30, 20:26:08.735] -> test_bitlinear_layer_forward_pass passed.
+[2025-06-30, 20:27:50.286] -> Running test_bitlinear_layer_forward_pass... (OPTIMAL)
+[2025-06-30, 20:27:51.019] -> test_bitlinear_layer_forward_pass passed.
+[2025-06-30, 20:26:08.738] -> Running performance_benchmark_gpu_vs_scalar... (SAFE)
+[2025-06-30, 20:26:09.296] -> performance_benchmark_gpu_vs_scalar passed.
+[2025-06-30, 20:27:51.023] -> Running performance_benchmark_gpu_vs_scalar... (OPTIMAL)
+[2025-06-30, 20:27:51.581] -> performance_benchmark_gpu_vs_scalar passed.
+[2025-06-30, 20:26:09.298] -> Running precision_test_fp_edge_cases... (SAFE)
+[2025-06-30, 20:26:09.722] -> precision_test_fp_edge_cases passed.
+[2025-06-30, 20:26:09.726] -> Starting cross-device consistency test...
+[2025-06-30, 20:26:09.726] -> Calculating scalar reference result...
+[2025-06-30, 20:26:09.726] -> Scalar reference calculation complete.
+[2025-06-30, 20:26:09.962] -> Found 5 adapters. Running per-device subtests.
+[2025-06-30, 20:26:09.963] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER" ("Vulkan")
+[2025-06-30, 20:26:10.068] -> [Profile] Buffer Setup: 25.28ms
+[2025-06-30, 20:26:10.069] -> [Profile] Bind Group Setup: 261.00µs
+[2025-06-30, 20:26:10.070] -> [Profile] Dispatch & Submit: 579.40µs
+[2025-06-30, 20:26:10.070] -> [Profile] Readback (map/poll/copy): 299.40µs
+[2025-06-30, 20:26:10.070] -> [Profile] Total launch_gpu_kernel Time: 27.07ms
+[2025-06-30, 20:26:10.128] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER" ("Vulkan")
+[2025-06-30, 20:26:10.128] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
+[2025-06-30, 20:26:21.972] -> [Profile] Buffer Setup: 9.39ms
+[2025-06-30, 20:26:21.972] -> [Profile] Bind Group Setup: 227.10µs
+[2025-06-30, 20:26:21.975] -> [Profile] Dispatch & Submit: 2.77ms
+[2025-06-30, 20:26:21.977] -> [Profile] Readback (map/poll/copy): 2.29ms
+[2025-06-30, 20:26:21.978] -> [Profile] Total launch_gpu_kernel Time: 15.38ms
+[2025-06-30, 20:26:22.013] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
+[2025-06-30, 20:26:22.013] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
+[2025-06-30, 20:26:33.963] -> [Profile] Buffer Setup: 9.61ms
+[2025-06-30, 20:26:33.963] -> [Profile] Bind Group Setup: 210.00µs
+[2025-06-30, 20:26:33.966] -> [Profile] Dispatch & Submit: 2.82ms
+[2025-06-30, 20:26:33.968] -> [Profile] Readback (map/poll/copy): 1.69ms
+[2025-06-30, 20:26:33.968] -> [Profile] Total launch_gpu_kernel Time: 15.07ms
+[2025-06-30, 20:26:34.002] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
+[2025-06-30, 20:26:34.002] -> SUBTEST: Running on "Microsoft Basic Render Driver" ("Dx12")
+[2025-06-30, 20:26:34.003] -> SKIPPING: Microsoft Basic Render Driver ("Dx12")
+[2025-06-30, 20:26:34.003] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER/PCIe/SSE2" ("OpenGL")
+[2025-06-30, 20:26:34.027] -> [Profile] Buffer Setup: 1.61ms
+[2025-06-30, 20:26:34.027] -> [Profile] Bind Group Setup: 154.20µs
+[2025-06-30, 20:26:34.029] -> [Profile] Dispatch & Submit: 1.98ms
+[2025-06-30, 20:26:34.034] -> [Profile] Readback (map/poll/copy): 4.35ms
+[2025-06-30, 20:26:34.034] -> [Profile] Total launch_gpu_kernel Time: 8.88ms
+[2025-06-30, 20:26:34.036] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER/PCIe/SSE2" ("OpenGL")
+[2025-06-30, 20:26:34.037] -> Cross-device consistency test PASSED on all tested devices.
+[2025-06-30, 20:27:51.582] -> Running precision_test_fp_edge_cases... (OPTIMAL)
+[2025-06-30, 20:27:52.019] -> precision_test_fp_edge_cases passed.
+[2025-06-30, 20:27:52.022] -> Starting cross-device consistency test...
+[2025-06-30, 20:27:52.022] -> Calculating scalar reference result...
+[2025-06-30, 20:27:52.023] -> Scalar reference calculation complete.
+[2025-06-30, 20:27:52.245] -> Found 5 adapters. Running per-device subtests.
+[2025-06-30, 20:27:52.245] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER" ("Vulkan")
+[2025-06-30, 20:27:52.331] -> [Profile] Buffer Setup: 8.37ms
+[2025-06-30, 20:27:52.331] -> [Profile] Bind Group Setup: 239.00µs
+[2025-06-30, 20:27:52.332] -> [Profile] Dispatch & Submit: 607.80µs
+[2025-06-30, 20:27:52.332] -> [Profile] Readback (map/poll/copy): 116.20µs
+[2025-06-30, 20:27:52.333] -> [Profile] Total launch_gpu_kernel Time: 10.02ms
+[2025-06-30, 20:27:52.358] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER" ("Vulkan")
+[2025-06-30, 20:27:52.358] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
+[2025-06-30, 20:28:04.365] -> [Profile] Buffer Setup: 9.38ms
+[2025-06-30, 20:28:04.366] -> [Profile] Bind Group Setup: 219.80µs
+[2025-06-30, 20:28:04.369] -> [Profile] Dispatch & Submit: 2.80ms
+[2025-06-30, 20:28:04.371] -> [Profile] Readback (map/poll/copy): 2.40ms
+[2025-06-30, 20:28:04.371] -> [Profile] Total launch_gpu_kernel Time: 15.55ms
+[2025-06-30, 20:28:04.405] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
+[2025-06-30, 20:28:04.406] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
+[2025-06-30, 20:28:16.493] -> [Profile] Buffer Setup: 9.67ms
+[2025-06-30, 20:28:16.494] -> [Profile] Bind Group Setup: 210.40µs
+[2025-06-30, 20:28:16.497] -> [Profile] Dispatch & Submit: 2.65ms
+[2025-06-30, 20:28:16.499] -> [Profile] Readback (map/poll/copy): 2.35ms
+[2025-06-30, 20:28:16.499] -> [Profile] Total launch_gpu_kernel Time: 15.53ms
+[2025-06-30, 20:28:16.535] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER" ("Dx12")
+[2025-06-30, 20:28:16.536] -> SUBTEST: Running on "Microsoft Basic Render Driver" ("Dx12")
+[2025-06-30, 20:28:16.536] -> SKIPPING: Microsoft Basic Render Driver ("Dx12")
+[2025-06-30, 20:28:16.537] -> SUBTEST: Running on "NVIDIA GeForce RTX 2070 SUPER/PCIe/SSE2" ("OpenGL")
+[2025-06-30, 20:28:16.561] -> [Profile] Buffer Setup: 2.27ms
+[2025-06-30, 20:28:16.562] -> [Profile] Bind Group Setup: 78.80µs
+[2025-06-30, 20:28:16.564] -> [Profile] Dispatch & Submit: 1.66ms
+[2025-06-30, 20:28:16.568] -> [Profile] Readback (map/poll/copy): 4.47ms
+[2025-06-30, 20:28:16.568] -> [Profile] Total launch_gpu_kernel Time: 9.44ms
+[2025-06-30, 20:28:16.571] -> PASS: Kernel correctness on "NVIDIA GeForce RTX 2070 SUPER/PCIe/SSE2" ("OpenGL")
+[2025-06-30, 20:28:16.571] -> Cross-device consistency test PASSED on all tested devices.
+[2025-06-30, 20:26:34.110] -> Running streaming_load_test...
+[2025-06-30, 20:26:34.525] -> streaming_load_test passed.
+[2025-06-30, 20:28:16.647] -> Running streaming_load_test...
+[2025-06-30, 20:28:17.067] -> streaming_load_test passed.
+[2025-06-30, 20:26:09.691] -> [Profile] Buffer Setup: 10.21ms
+[2025-06-30, 20:26:09.691] -> [Profile] Bind Group Setup: 234.10µs
+[2025-06-30, 20:26:09.692] -> [Profile] Dispatch & Submit: 603.00µs
+[2025-06-30, 20:26:09.692] -> [Profile] Readback (map/poll/copy): 140.20µs
+[2025-06-30, 20:26:09.692] -> [Profile] Total launch_gpu_kernel Time: 11.94ms
+[2025-06-30, 20:27:51.968] -> [Profile] Buffer Setup: 8.74ms
+[2025-06-30, 20:27:51.968] -> [Profile] Bind Group Setup: 233.80µs
+[2025-06-30, 20:27:51.969] -> [Profile] Dispatch & Submit: 663.90µs
+[2025-06-30, 20:27:51.970] -> [Profile] Readback (map/poll/copy): 91.80µs
+[2025-06-30, 20:27:51.970] -> [Profile] Total launch_gpu_kernel Time: 10.39ms
+[2025-06-30, 20:29:31.268] -> [Profile] Buffer Setup: 807.80µs
+[2025-06-30, 20:29:31.268] -> [Profile] Bind Group Setup: 78.00µs
+[2025-06-30, 20:29:31.268] -> [Profile] Dispatch & Submit: 227.30µs
+[2025-06-30, 20:29:31.269] -> [Profile] Readback (map/poll/copy): 74.20µs
+[2025-06-30, 20:29:31.269] -> [Profile] Total launch_gpu_kernel Time: 1.75ms
+[2025-06-30, 20:30:45.535] -> [Profile] Buffer Setup: 728.10µs
+[2025-06-30, 20:30:45.535] -> [Profile] Bind Group Setup: 85.80µs
+[2025-06-30, 20:30:45.535] -> [Profile] Dispatch & Submit: 226.50µs
+[2025-06-30, 20:30:45.536] -> [Profile] Readback (map/poll/copy): 69.90µs
+[2025-06-30, 20:30:45.536] -> [Profile] Total launch_gpu_kernel Time: 1.68ms
+[2025-06-30, 20:26:04.119] -> Successfully caught invalid weight value (2) as a Result::Err.
+[2025-06-30, 20:26:04.119] -> Successfully caught invalid weight value (-2) as a Result::Err.
+[2025-06-30, 20:26:34.528] -> Running memory_safety_hardcoded_large_allocation_test... (SAFE)
+[2025-06-30, 20:26:34.912] -> memory_safety_hardcoded_large_allocation_test passed.
+[2025-06-30, 20:28:17.069] -> Running memory_safety_hardcoded_large_allocation_test... (OPTIMAL)
+[2025-06-30, 20:28:17.447] -> memory_safety_hardcoded_large_allocation_test passed.
+[2025-06-30, 20:29:31.285] -> [WARM] Successfully caught expected error for 10GB allocation: Requested buffer size (10737418240 bytes) exceeds device limits.
+[2025-06-30, 20:30:45.553] -> [WARM] Successfully caught expected error for 10GB allocation: Requested buffer size (10737418240 bytes) exceeds device limits.
+[2025-06-30, 20:26:34.915] -> Running stress_test_maximum_dimension_support... (SAFE)
+[2025-06-30, 20:26:36.094] -> [Profile] Buffer Setup: 17.45ms
+[2025-06-30, 20:26:36.094] -> [Profile] Bind Group Setup: 262.20µs
+[2025-06-30, 20:26:36.095] -> [Profile] Dispatch & Submit: 655.80µs
+[2025-06-30, 20:26:36.187] -> [Profile] Readback (map/poll/copy): 91.46ms
+[2025-06-30, 20:26:36.187] -> [Profile] Total launch_gpu_kernel Time: 110.65ms
+[2025-06-30, 20:26:37.317] -> stress_test_maximum_dimension_support passed.
+[2025-06-30, 20:28:17.449] -> Running stress_test_maximum_dimension_support... (OPTIMAL)
+[2025-06-30, 20:28:18.613] -> [Profile] Buffer Setup: 21.38ms
+[2025-06-30, 20:28:18.613] -> [Profile] Bind Group Setup: 252.80µs
+[2025-06-30, 20:28:18.614] -> [Profile] Dispatch & Submit: 601.30µs
+[2025-06-30, 20:28:18.706] -> [Profile] Readback (map/poll/copy): 91.51ms
+[2025-06-30, 20:28:18.706] -> [Profile] Total launch_gpu_kernel Time: 114.57ms
+[2025-06-30, 20:28:19.839] -> stress_test_maximum_dimension_support passed.
+[2025-06-30, 20:29:31.284] -> [WARM] Successfully caught expected error: Requested buffer size (268435520 bytes) exceeds device limits.
+[2025-06-30, 20:29:32.117] -> [Profile] Buffer Setup: 11.23ms
+[2025-06-30, 20:29:32.117] -> [Profile] Bind Group Setup: 212.90µs
+[2025-06-30, 20:29:32.118] -> [Profile] Dispatch & Submit: 439.00µs
+[2025-06-30, 20:29:32.209] -> [Profile] Readback (map/poll/copy): 90.90ms
+[2025-06-30, 20:29:32.209] -> [Profile] Total launch_gpu_kernel Time: 103.66ms
+[2025-06-30, 20:30:45.552] -> [WARM] Successfully caught expected error: Requested buffer size (268435520 bytes) exceeds device limits.
+[2025-06-30, 20:30:46.392] -> [Profile] Buffer Setup: 12.08ms
+[2025-06-30, 20:30:46.393] -> [Profile] Bind Group Setup: 212.30µs
+[2025-06-30, 20:30:46.394] -> [Profile] Dispatch & Submit: 466.80µs
+[2025-06-30, 20:30:46.485] -> [Profile] Readback (map/poll/copy): 91.26ms
+[2025-06-30, 20:30:46.485] -> [Profile] Total launch_gpu_kernel Time: 104.88ms
+[2025-06-30, 20:26:04.537] -> WGPU context creation succeeded unexpectedly with impossible limits.
+[2025-06-30, 20:26:04.538] -> Requested limits: Limits { max_texture_dimension_1d: 8192, max_texture_dimension_2d: 8192, max_texture_dimension_3d: 2048, max_texture_array_layers: 256, max_bind_groups: 4, max_bindings_per_bind_group: 1000, max_dynamic_uniform_buffers_per_pipeline_layout: 8, max_dynamic_storage_buffers_per_pipeline_layout: 4, max_sampled_textures_per_shader_stage: 16, max_samplers_per_shader_stage: 16, max_storage_buffers_per_shader_stage: 8, max_storage_textures_per_shader_stage: 4, max_uniform_buffers_per_shader_stage: 12, max_binding_array_elements_per_shader_stage: 0, max_binding_array_sampler_elements_per_shader_stage: 0, max_uniform_buffer_binding_size: 65536, max_storage_buffer_binding_size: 134217728, max_vertex_buffers: 8, max_buffer_size: 1, max_vertex_attributes: 16, max_vertex_buffer_array_stride: 2048, min_uniform_buffer_offset_alignment: 256, min_storage_buffer_offset_alignment: 256, max_inter_stage_shader_components: 60, max_color_attachments: 8, max_color_attachment_bytes_per_sample: 32, max_compute_workgroup_storage_size: 16384, max_compute_invocations_per_workgroup: 256, max_compute_workgroup_size_x: 256, max_compute_workgroup_size_y: 256, max_compute_workgroup_size_z: 64, max_compute_workgroups_per_dimension: 65535, min_subgroup_size: 0, max_subgroup_size: 0, max_push_constant_size: 0, max_non_sampler_bindings: 1000000 }
+[2025-06-30, 20:26:04.538] -> Actual device limits returned: Limits { max_texture_dimension_1d: 8192, max_texture_dimension_2d: 8192, max_texture_dimension_3d: 2048, max_texture_array_layers: 256, max_bind_groups: 4, max_bindings_per_bind_group: 1000, max_dynamic_uniform_buffers_per_pipeline_layout: 8, max_dynamic_storage_buffers_per_pipeline_layout: 4, max_sampled_textures_per_shader_stage: 16, max_samplers_per_shader_stage: 16, max_storage_buffers_per_shader_stage: 8, max_storage_textures_per_shader_stage: 4, max_uniform_buffers_per_shader_stage: 12, max_binding_array_elements_per_shader_stage: 0, max_binding_array_sampler_elements_per_shader_stage: 0, max_uniform_buffer_binding_size: 65536, max_storage_buffer_binding_size: 134217728, max_vertex_buffers: 8, max_buffer_size: 1, max_vertex_attributes: 16, max_vertex_buffer_array_stride: 2048, min_uniform_buffer_offset_alignment: 256, min_storage_buffer_offset_alignment: 256, max_inter_stage_shader_components: 60, max_color_attachments: 8, max_color_attachment_bytes_per_sample: 32, max_compute_workgroup_storage_size: 16384, max_compute_invocations_per_workgroup: 256, max_compute_workgroup_size_x: 256, max_compute_workgroup_size_y: 256, max_compute_workgroup_size_z: 64, max_compute_workgroups_per_dimension: 65535, min_subgroup_size: 0, max_subgroup_size: 0, max_push_constant_size: 0, max_non_sampler_bindings: 1000000 }
+[2025-06-30, 20:26:04.983] -> Testing scalar packing-decoding symmetry...
+[2025-06-30, 20:26:04.984] -> Original weights:  [-1, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1, 0]
+[2025-06-30, 20:26:04.984] -> Decoded weights:   [-1, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1, 0]
+[2025-06-30, 20:26:04.984] -> Scalar packing-decoding symmetry test passed.
+[2025-06-30, 20:26:03.466] -> STARTING KERNEL TEST SUITE
+[2025-06-30, 20:26:04.984] -> --- STARTING COLD RUN (SAFE) ---
+[2025-06-30, 20:26:04.985] -> [KERNEL] Using shader: ../src/kernels/bitnet_kernel.wgsl
+[2025-06-30, 20:27:47.309] -> --- STARTING COLD RUN (OPTIMAL) ---
+[2025-06-30, 20:27:47.309] -> [KERNEL] Using shader: ../src/kernels/bitnet_kernel_optimal.wgsl
+[2025-06-30, 20:29:30.327] -> --- STARTING WARM RUN (SAFE) ---
+[2025-06-30, 20:29:30.327] -> [KERNEL] Using shader: ../src/kernels/bitnet_kernel.wgsl
+[2025-06-30, 20:30:44.587] -> --- STARTING WARM RUN (OPTIMAL) ---
+[2025-06-30, 20:30:44.587] -> [KERNEL] Using shader: ../src/kernels/bitnet_kernel_optimal.wgsl
+[2025-06-30, 20:29:30.735] -> [WARM] low_level_kernel_correctness_test passed. (SAFE)
+[2025-06-30, 20:30:44.999] -> [WARM] low_level_kernel_correctness_test passed. (OPTIMAL)
+[2025-06-30, 20:29:30.737] -> [WARM] test_gpu_kernel_dimensions passed. (SAFE)
+[2025-06-30, 20:30:45.002] -> [WARM] test_gpu_kernel_dimensions passed. (OPTIMAL)
+[2025-06-30, 20:29:30.741] -> [WARM] kernel_large_batch_test passed. (SAFE)
+[2025-06-30, 20:30:45.005] -> [WARM] kernel_large_batch_test passed. (OPTIMAL)
+[2025-06-30, 20:26:06.666] -> kernel_all_zero_test passed.
+[2025-06-30, 20:27:48.977] -> kernel_all_zero_test passed.
+[2025-06-30, 20:29:30.745] -> [WARM] kernel_all_zero_test passed. (SAFE)
+[2025-06-30, 20:30:45.009] -> [WARM] kernel_all_zero_test passed. (OPTIMAL)
+[2025-06-30, 20:26:07.113] -> kernel_all_plus_one_weights_test passed.
+[2025-06-30, 20:27:49.397] -> kernel_all_plus_one_weights_test passed.
+[2025-06-30, 20:29:30.748] -> [WARM] kernel_all_plus_one_weights_test passed. (SAFE)
+[2025-06-30, 20:30:45.012] -> [WARM] kernel_all_plus_one_weights_test passed. (OPTIMAL)
+[2025-06-30, 20:26:07.523] -> kernel_all_minus_one_weights_test passed.
+[2025-06-30, 20:27:49.803] -> kernel_all_minus_one_weights_test passed.
+[2025-06-30, 20:29:30.752] -> [WARM] kernel_all_minus_one_weights_test passed. (SAFE)
+[2025-06-30, 20:30:45.016] -> [WARM] kernel_all_minus_one_weights_test passed. (OPTIMAL)
+[2025-06-30, 20:26:07.934] -> kernel_non_divisible_batch_test passed.
+[2025-06-30, 20:27:50.226] -> kernel_non_divisible_batch_test passed.
+[2025-06-30, 20:29:30.755] -> [WARM] kernel_non_divisible_batch_test passed. (SAFE)
+[2025-06-30, 20:30:45.020] -> [WARM] kernel_non_divisible_batch_test passed. (OPTIMAL)
+[2025-06-30, 20:29:31.112] -> [WARM] test_bitlinear_layer_forward_pass passed. (SAFE)
+[2025-06-30, 20:30:45.379] -> [WARM] test_bitlinear_layer_forward_pass passed. (OPTIMAL)
+[2025-06-30, 20:29:31.266] -> [WARM] Performance Benchmark (100 iterations, 64 batch, 32 in, 16 out):
+  GPU (Wall Time):    Avg: 1.419ms    | Total: 141.921ms 
+  Scalar (CPU Time):  Avg: 108.698µs  | Total: 10.870ms  
 Speedup (Wall vs Scalar):   0.08x
-[2025-06-30, 19:29:10.073] -> [WARM] performance_benchmark_gpu_vs_scalar passed. (SAFE)
-[2025-06-30, 19:30:24.061] -> [WARM] Performance Benchmark (100 iterations, 64 batch, 32 in, 16 out):
-  GPU (Wall Time):    Avg: 1.424ms    | Total: 142.432ms 
-  Scalar (CPU Time):  Avg: 109.410µs  | Total: 10.941ms  
+[2025-06-30, 20:29:31.267] -> [WARM] performance_benchmark_gpu_vs_scalar passed. (SAFE)
+[2025-06-30, 20:30:45.533] -> [WARM] Performance Benchmark (100 iterations, 64 batch, 32 in, 16 out):
+  GPU (Wall Time):    Avg: 1.415ms    | Total: 141.519ms 
+  Scalar (CPU Time):  Avg: 110.214µs  | Total: 11.021ms  
 Speedup (Wall vs Scalar):   0.08x
-[2025-06-30, 19:30:24.062] -> [WARM] performance_benchmark_gpu_vs_scalar passed. (OPTIMAL)
-[2025-06-30, 19:29:10.076] -> [WARM] precision_test_fp_edge_cases passed. (SAFE)
-[2025-06-30, 19:30:24.064] -> [WARM] precision_test_fp_edge_cases passed. (OPTIMAL)
-[2025-06-30, 19:29:10.091] -> [WARM] Streaming Load Test (10 streams): Avg Latency: 1.368ms
-[2025-06-30, 19:30:24.079] -> [WARM] Streaming Load Test (10 streams): Avg Latency: 1.383ms
-[2025-06-30, 19:29:12.139] -> [WARM] stress_test_maximum_dimension_support passed. (SAFE)
-[2025-06-30, 19:30:26.144] -> [WARM] stress_test_maximum_dimension_support passed. (OPTIMAL)
-[2025-06-30, 19:26:15.457] -> Running performance_benchmark_gpu_vs_scalar_large_batch: batch_size=2048, in_features=1024, out_features=1024, iterations=30, shader_label=SAFE
-[2025-06-30, 19:27:26.016] -> Large Batch Performance Benchmark (30 iterations, 2048 batch, 1024 in, 1024 out, shader_label=SAFE):
-  GPU (Wall Time):    Avg: 137.855ms  | Total: 4.136s    
-  Scalar (CPU Time):  Avg: 2.166s     | Total: 64.994s   
-Speedup (Wall vs Scalar):   15.72x
-[2025-06-30, 19:27:58.762] -> Running performance_benchmark_gpu_vs_scalar_large_batch: batch_size=2048, in_features=1024, out_features=1024, iterations=30, shader_label=OPTIMAL
-[2025-06-30, 19:29:09.092] -> Large Batch Performance Benchmark (30 iterations, 2048 batch, 1024 in, 1024 out, shader_label=OPTIMAL):
-  GPU (Wall Time):    Avg: 136.454ms  | Total: 4.094s    
-  Scalar (CPU Time):  Avg: 2.161s     | Total: 64.826s   
-Speedup (Wall vs Scalar):   15.84x
-[2025-06-30, 19:29:12.141] -> Running performance_benchmark_gpu_vs_scalar_large_batch: batch_size=2048, in_features=1024, out_features=1024, iterations=30, shader_label=SAFE
-[2025-06-30, 19:30:23.085] -> Large Batch Performance Benchmark (30 iterations, 2048 batch, 1024 in, 1024 out, shader_label=SAFE):
-  GPU (Wall Time):    Avg: 144.884ms  | Total: 4.347s    
-  Scalar (CPU Time):  Avg: 2.184s     | Total: 65.521s   
-Speedup (Wall vs Scalar):   15.07x
-[2025-06-30, 19:30:26.145] -> Running performance_benchmark_gpu_vs_scalar_large_batch: batch_size=2048, in_features=1024, out_features=1024, iterations=30, shader_label=OPTIMAL
-[2025-06-30, 19:31:37.492] -> Large Batch Performance Benchmark (30 iterations, 2048 batch, 1024 in, 1024 out, shader_label=OPTIMAL):
-  GPU (Wall Time):    Avg: 142.572ms  | Total: 4.277s    
-  Scalar (CPU Time):  Avg: 2.199s     | Total: 65.979s   
-Speedup (Wall vs Scalar):   15.43x
+[2025-06-30, 20:30:45.534] -> [WARM] performance_benchmark_gpu_vs_scalar passed. (OPTIMAL)
+[2025-06-30, 20:29:31.269] -> [WARM] precision_test_fp_edge_cases passed. (SAFE)
+[2025-06-30, 20:30:45.536] -> [WARM] precision_test_fp_edge_cases passed. (OPTIMAL)
+[2025-06-30, 20:29:31.284] -> [WARM] Streaming Load Test (10 streams): Avg Latency: 1.376ms
+[2025-06-30, 20:30:45.552] -> [WARM] Streaming Load Test (10 streams): Avg Latency: 1.495ms
+[2025-06-30, 20:29:33.332] -> [WARM] stress_test_maximum_dimension_support passed. (SAFE)
+[2025-06-30, 20:30:47.609] -> [WARM] stress_test_maximum_dimension_support passed. (OPTIMAL)
+[2025-06-30, 20:26:37.320] -> Running performance_benchmark_gpu_vs_scalar_large_batch: batch_size=2048, in_features=1024, out_features=1024, iterations=30, shader_label=SAFE
+[2025-06-30, 20:27:47.267] -> Large Batch Performance Benchmark (30 iterations, 2048 batch, 1024 in, 1024 out, shader_label=SAFE):
+  GPU (Wall Time):    Avg: 136.428ms  | Total: 4.093s    
+  Scalar (CPU Time):  Avg: 2.147s     | Total: 64.423s   
+Speedup (Wall vs Scalar):   15.74x
+[2025-06-30, 20:28:19.840] -> Running performance_benchmark_gpu_vs_scalar_large_batch: batch_size=2048, in_features=1024, out_features=1024, iterations=30, shader_label=OPTIMAL
+[2025-06-30, 20:29:30.286] -> Large Batch Performance Benchmark (30 iterations, 2048 batch, 1024 in, 1024 out, shader_label=OPTIMAL):
+  GPU (Wall Time):    Avg: 136.337ms  | Total: 4.090s    
+  Scalar (CPU Time):  Avg: 2.164s     | Total: 64.923s   
+Speedup (Wall vs Scalar):   15.87x
+[2025-06-30, 20:29:33.333] -> Running performance_benchmark_gpu_vs_scalar_large_batch: batch_size=2048, in_features=1024, out_features=1024, iterations=30, shader_label=SAFE
+[2025-06-30, 20:30:44.548] -> Large Batch Performance Benchmark (30 iterations, 2048 batch, 1024 in, 1024 out, shader_label=SAFE):
+  GPU (Wall Time):    Avg: 144.104ms  | Total: 4.323s    
+  Scalar (CPU Time):  Avg: 2.194s     | Total: 65.819s   
+Speedup (Wall vs Scalar):   15.22x
+[2025-06-30, 20:30:47.611] -> Running performance_benchmark_gpu_vs_scalar_large_batch: batch_size=2048, in_features=1024, out_features=1024, iterations=30, shader_label=OPTIMAL
+[2025-06-30, 20:31:59.064] -> Large Batch Performance Benchmark (30 iterations, 2048 batch, 1024 in, 1024 out, shader_label=OPTIMAL):
+  GPU (Wall Time):    Avg: 144.646ms  | Total: 4.339s    
+  Scalar (CPU Time):  Avg: 2.201s     | Total: 66.037s   
+Speedup (Wall vs Scalar):   15.22x
 ```
 
 </details>
@@ -473,8 +473,8 @@ Speedup (Wall vs Scalar):   15.43x
 
 ### Timing Information
 
-- **Total Time:** 47.18 sec
-- **Average Time:** 1097.00 ms
+- **Total Time:** 47.12 sec
+- **Average Time:** 1095.00 ms
 
 ### Status
 

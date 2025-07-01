@@ -5,7 +5,7 @@ use serde::{Serialize, Deserialize};
 use rayon::prelude::*;
 use thiserror::Error;
 use std::time::Instant;
-use rand::{self};
+
 
 // ================================================================================================
 // Error Handling
@@ -224,6 +224,9 @@ pub fn quantize_to_1_58_bit_optimized(tensor: &[f32], shape: &[usize]) -> (Vec<i
 
 pub fn pack_ternary_weights_optimized(weights: &[i8]) -> Result<Vec<u32>> {
     if weights.len() % 16 != 0 {
+        // To make this more robust for models where K is not a multiple of 16,
+        // we can pad the input weights. For now, we keep the strict check.
+        // A more robust implementation would pad `weights` with 0s to a multiple of 16 here.
         return Err(ConversionError::InvalidWeightCount { count: weights.len() });
     }
     
@@ -234,12 +237,15 @@ pub fn pack_ternary_weights_optimized(weights: &[i8]) -> Result<Vec<u32>> {
         
         // Unroll loop for better performance
         for i in 0..16 {
+            // CORRECTED: This mapping now matches the WGSL kernel's decoding logic.
+            // WGSL decode: 1 -> +1, 2 -> -1, 0/3 -> 0
             let encoded = match chunk[i] {
-                -1 => 0u32,
-                0 => 1u32,
-                1 => 2u32,
+                1 => 1u32,  // 01
+               -1 => 2u32,  // 10
+                0 => 0u32,  // 00
                 invalid => return Err(ConversionError::InvalidTernaryWeight { value: invalid }),
             };
+            // Pack with LSB-first ordering to match the kernel
             packed_val |= encoded << (i * 2);
         }
         
@@ -536,9 +542,9 @@ mod tests {
             for i in 0..16 {
                 let two_bits = ((packed_u32 >> (i * 2)) & 3) as u8;
                 let val_i8 = match two_bits {
-                    0 => -1,
-                    1 => 0,
-                    2 => 1,
+                    0 => 0,   // 00 -> 0
+                    1 => 1,   // 01 -> 1
+                    2 => -1,  // 10 -> -1
                     _ => 0,
                 };
                 i8_data.push(val_i8);

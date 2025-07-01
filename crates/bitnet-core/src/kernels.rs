@@ -1,3 +1,6 @@
+// --- File: crates/bitnet-core/src/kernels.rs ---
+// --- FULL REPLACEMENT ---
+
 //! GPU and CPU kernel implementations for BitNet operations.
 //!
 //! This module provides the core computational kernels used in BitNet,
@@ -16,8 +19,8 @@
 //! use bitnet_core::kernels::{pack_ternary_weights, calculate_weight_scales};
 //!
 //! // Pack ternary weights into u32s
-//! let weights = vec![-1i8, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1, 0];
-//! let packed = pack_ternary_weights(&weights);
+//! let weights = vec![vec![-1i8, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1, 0]];
+//! let (packed, _) = pack_ternary_weights(&weights).unwrap();
 //!
 //! // Calculate per-channel scaling factors
 //! let channels = vec![
@@ -91,9 +94,9 @@ pub struct BitnetMetadata {
 ///
 /// This function converts a 2D array of ternary weights (-1, 0, +1) into:
 /// 1. A packed format where each weight uses 2 bits:
-///    - -1 => 00 (binary 0)
-///    - 0  => 01 (binary 1)
-///    - +1 => 10 (binary 2)
+///    - +1 => 01 (binary 1)
+///    - -1 => 10 (binary 2)
+///    -  0 => 00 (binary 0)
 /// 2. Per-output-channel scaling factors
 ///
 /// # Packing Order (LSB-first)
@@ -118,10 +121,13 @@ pub struct BitnetMetadata {
 ///     vec![-1i8, 0, 1],  // First output channel
 ///     vec![0, 1, -1],     // Second output channel
 /// ];
-/// let (packed, scales) = pack_ternary_weights(&weights);
+/// let (packed, scales) = pack_ternary_weights(&weights).unwrap();
 /// ```
 pub fn pack_ternary_weights(weights: &[Vec<i8>]) -> Result<(Vec<u32>, Vec<f32>), BitNetError> {
     let out_features = weights.len();
+    if out_features == 0 {
+        return Ok((Vec::new(), Vec::new()));
+    }
     let in_features = weights[0].len();
     let packed_size = (in_features + 15) / 16;
     
@@ -145,11 +151,12 @@ pub fn pack_ternary_weights(weights: &[Vec<i8>]) -> Result<(Vec<u32>, Vec<f32>),
             let pack_idx = in_idx / 16;
             let bit_idx = (in_idx % 16) * 2; // LSB-first: first weight in bits 0-1
             
-            // Map -1, 0, +1 to 2-bit values
+            // CORRECTED: This mapping now matches the WGSL kernel's decoding logic.
+            // WGSL decode: 1 -> +1, 2 -> -1, 0/3 -> 0
             let bits = match w {
-                -1 => 0u32, // 00
-                0 => 1u32,  // 01
-                1 => 2u32,  // 10
+                 1 => 1u32, // 01
+                -1 => 2u32, // 10
+                 0 => 0u32, // 00 (or 3, but 0 is simpler and matches the kernel's default case)
                 _ => return Err(BitNetError::InvalidWeightValue(w)),
             };
             
@@ -159,6 +166,7 @@ pub fn pack_ternary_weights(weights: &[Vec<i8>]) -> Result<(Vec<u32>, Vec<f32>),
     
     Ok((packed_weights, weight_scales))
 }
+
 
 /// Calculate per-output-channel weight scaling factors.
 ///
@@ -208,30 +216,28 @@ mod tests {
     fn test_weight_packing() {
         let t0 = Instant::now();
         let weights = vec![
-            vec![-1i8, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1, 0],
-            vec![1i8, -1, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1],
+            vec![-1i8, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1, 0], // Row 0
+            vec![1i8, -1, 0, 1, 0, -1, 1, 0, 0, 1, -1, 0, 1, 0, -1, 1], // Row 1
         ];
         let (packed, scales) = pack_ternary_weights(&weights).unwrap();
         
-        // Check packed size
-        assert_eq!(packed.len(), 2); // 2 output channels, 16 inputs each = 2 u32s
-        
-        // Check scales
+        assert_eq!(packed.len(), 2);
         assert_eq!(scales.len(), 2);
         assert!(scales.iter().all(|&s| s > 0.0));
         
-        // Verify first row packing (LSB-first)
+        // --- Verify first row with CORRECTED packing logic ---
         // Input:  -1,  0,  1,  0, -1,  1,  0,  0,  1, -1,  0,  1,  0, -1,  1,  0
-        // Bits:   00, 01, 10, 01, 00, 10, 01, 01, 10, 00, 01, 10, 01, 00, 10, 01
+        // Bits:   10, 00, 01, 00, 10, 01, 00, 00, 01, 10, 00, 01, 00, 10, 01, 00
         // LSB-first: first weight in bits 0-1, last in 30-31
-        let expected = 0b01_10_00_01_10_01_01_10_00_10_01_00_01_10_01_00u32;
-        assert_eq!(packed[0], expected, "Packed weights don't match expected pattern.\nExpected: {:032b}\nGot:      {:032b}", expected, packed[0]);
+        let expected_row0 = 0b00_01_10_00_01_00_10_01_00_00_01_10_00_01_00_10u32;
+        assert_eq!(packed[0], expected_row0, "Packed weights for row 0 don't match corrected pattern.\nExpected: {:032b}\nGot:      {:032b}", expected_row0, packed[0]);
         
-        // Verify second row packing
+        // --- Verify second row with CORRECTED packing logic ---
         // Input:   1, -1,  0,  1,  0, -1,  1,  0,  0,  1, -1,  0,  1,  0, -1,  1
-        // Bits:   10, 00, 01, 10, 01, 00, 10, 01, 01, 10, 00, 01, 10, 01, 00, 10
-        let expected_second = 0b10_00_01_10_01_00_10_01_01_10_00_01_10_01_00_10u32;
-        assert_eq!(packed[1], expected_second, "Second row packed weights don't match expected pattern.\nExpected: {:032b}\nGot:      {:032b}", expected_second, packed[1]);
+        // Bits:   01, 10, 00, 01, 00, 10, 01, 00, 00, 01, 10, 00, 01, 00, 10, 01
+        let expected_row1 = 0b01100001001001000001100001001001u32;
+        assert_eq!(packed[1], expected_row1, "Packed weights for row 1 don't match corrected pattern.\nExpected: {:032b}\nGot:      {:032b}", expected_row1, packed[1]);
+        
         println!("[TEST] test_weight_packing (took {:.2?})", t0.elapsed());
     }
 
@@ -239,22 +245,18 @@ mod tests {
     fn test_weight_scales() {
         let t0 = Instant::now();
         let weights = vec![
-            vec![-1i8, 0, 1],     // Average magnitude = 1.0 (sum=2, count=2)
-            vec![0, 0, 0],        // All zeros -> scale = 1.0
-            vec![1, 1, -1],       // Average magnitude = 1.0 (sum=3, count=3)
-            vec![-1, -1, 0],      // Average magnitude = 1.0 (sum=2, count=2)
+            vec![-1i8, 0, 1],
+            vec![0, 0, 0],
+            vec![1, 1, -1],
+            vec![-1, -1, 0],
         ];
         let scales = calculate_weight_scales(&weights);
         
         assert_eq!(scales.len(), 4);
-        // First row: (-1, 0, 1) -> sum=2, count=2 -> scale=1.0
-        assert!((scales[0] - 1.0).abs() < 1e-6, "First row scale should be 1.0");
-        // Second row: (0, 0, 0) -> sum=0, count=0 -> scale=1.0
-        assert!((scales[1] - 1.0).abs() < 1e-6, "All-zero row should have scale 1.0");
-        // Third row: (1, 1, -1) -> sum=3, count=3 -> scale=1.0
-        assert!((scales[2] - 1.0).abs() < 1e-6, "Third row scale should be 1.0");
-        // Fourth row: (-1, -1, 0) -> sum=2, count=2 -> scale=1.0
-        assert!((scales[3] - 1.0).abs() < 1e-6, "Fourth row scale should be 1.0");
+        assert!((scales[0] - 1.0).abs() < 1e-6);
+        assert!((scales[1] - 1.0).abs() < 1e-6);
+        assert!((scales[2] - 1.0).abs() < 1e-6);
+        assert!((scales[3] - 1.0).abs() < 1e-6);
         
         println!("[TEST] test_weight_scales (took {:.2?})", t0.elapsed());
     }
@@ -263,11 +265,8 @@ mod tests {
     fn test_invalid_weight_value() {
         let t0 = Instant::now();
         let weights = vec![vec![2i8; 16]]; // Invalid weight value
-        let result = pack_ternary_weights(&weights); // This should return an error
-        assert!(
-            matches!(result, Err(BitNetError::InvalidWeightValue(2))),
-            "Expected InvalidWeightValue error, but got {:?}", result
-        );
+        let result = pack_ternary_weights(&weights);
+        assert!(matches!(result, Err(BitNetError::InvalidWeightValue(2))), "Expected InvalidWeightValue error, but got {:?}", result);
         println!("[TEST] test_invalid_weight_value (took {:.2?})", t0.elapsed());
     }
 
@@ -278,15 +277,15 @@ mod tests {
         let weights = vec![original.clone()];
         let (packed, _) = pack_ternary_weights(&weights).unwrap();
         let packed_val = packed[0];
-        // Unpack using the same logic as the shader/scalar code (LSB-first)
+
+        // Unpack using the CORRECTED logic (LSB-first) that matches the GPU kernel.
         let mut unpacked = Vec::with_capacity(16);
         for i in 0..16 {
             let bits = (packed_val >> (i * 2)) & 0b11;
             let w = match bits {
-                0 => -1i8,
-                1 => 0i8,
-                2 => 1i8,
-                _ => 0i8, // Should never happen
+                1 => 1i8,
+                2 => -1i8,
+                _ => 0i8, // Handles 0b00 and 0b11
             };
             unpacked.push(w);
         }

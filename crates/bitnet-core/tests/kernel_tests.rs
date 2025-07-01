@@ -2444,10 +2444,9 @@ fn test_scalar_packing_decoding_symmetry() {
     for i in 0..16 {
         let bits = (packed_val >> (i * 2)) & 0b11;
         let weight = match bits {
-            0b00 => -1i8, // As per pack_ternary_weights
-            0b01 => 0i8,
-            0b10 => 1i8,
-            _ => panic!("Invalid 2-bit value"),
+            1 => 1i8,   // 01
+            2 => -1i8,  // 10
+            _ => 0i8,   // 00 or 11
         };
         decoded_weights.push(weight);
     }

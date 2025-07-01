@@ -1,25 +1,25 @@
 # SERIALIZATION_TEST Test Report
 
-> Generated on: 2025-06-19 21:07:04
+> Generated on: 2025-06-30 23:26:38
 
 ## Test Results
 
-| No. | Test Name | Status | Time Taken |
-|:---:|:----------|:------:|:----------:|
-|  1 | Block Streaming Serialization                      | ✅ Pass |    1.00 ms |
-|  2 | Full Model Serialization                           | ✅ Pass |    3.00 ms |
-|  3 | Streaming Multiple Blocks                          | ✅ Pass |    2.00 ms |
+| No. | Test Name | Status | Time Taken | Error Message |
+|:---:|:----------|:------:|:----------:|:-------------|
+|  1 | Block Streaming Serialization                      | ✅ Pass |    8.00 ms |             |
+|  2 | Full Model Serialization                           | ✅ Pass |   15.00 ms |             |
+|  3 | Streaming Multiple Blocks                          | ✅ Pass |   12.00 ms |             |
 
 <details>
 <summary>📝 View Full Log Dump</summary>
 
 ```
-[2025-06-19, 21:07:04.672] -> Running test_full_model_serialization...
-[2025-06-19, 21:07:04.675] -> Full model serialization/deserialization works.
-[2025-06-19, 21:07:04.675] -> Running test_block_streaming_serialization...
-[2025-06-19, 21:07:04.676] -> Block streaming serialization/deserialization works.
-[2025-06-19, 21:07:04.677] -> Running test_streaming_multiple_blocks...
-[2025-06-19, 21:07:04.678] -> Streaming multiple blocks as separate files works.
+[2025-06-30, 23:26:38.208] -> Running test_full_model_serialization...
+[2025-06-30, 23:26:38.222] -> Full model serialization/deserialization works.
+[2025-06-30, 23:26:38.223] -> Running test_block_streaming_serialization...
+[2025-06-30, 23:26:38.231] -> Block streaming serialization/deserialization works.
+[2025-06-30, 23:26:38.232] -> Running test_streaming_multiple_blocks...
+[2025-06-30, 23:26:38.245] -> Streaming multiple blocks as separate files works.
 ```
 
 </details>
@@ -35,8 +35,8 @@
 
 ### Timing Information
 
-- **Total Time:** 0.01 sec
-- **Average Time:** 2.00 ms
+- **Total Time:** 0.04 sec
+- **Average Time:** 12.00 ms
 
 ### Status
 

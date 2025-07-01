@@ -116,6 +116,7 @@ pub mod settings;
 pub mod tokenizer;
 pub mod bitnet_linear;
 pub mod embedding;
+pub mod rope;
 
 #[cfg(feature = "core-gui")]
 #[cfg_attr(docsrs, doc(cfg(feature = "core-gui")))]
@@ -125,6 +126,11 @@ pub mod visualization;
 #[cfg(feature = "training")]
 #[cfg_attr(docsrs, doc(cfg(feature = "training")))]
 pub mod training;
+
+pub mod pipeline;
+pub use pipeline::{Pipeline, PipelineOptions, PipelineResult, PipelineError};
+
+pub mod bitnetcore_test_utils;
 
 #[cfg(test)]
 mod tests {
