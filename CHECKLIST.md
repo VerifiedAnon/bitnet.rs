@@ -103,23 +103,42 @@ bitnet-rs/
 │   │           ├── backend.rs     🟠 Stub, minimal backend logic.
 │   │           └── README.md      ✅ App GUI documentation.
 │   │
-│   └── bitnet-tools/
-│       ├── Cargo.toml        ✅ Tools crate manifest
-│       ├── README.md         ✅ Tools crate documentation
+│   ├── bitnet-tools/
+│   │   ├── Cargo.toml        ✅ Tools crate manifest
+│   │   ├── README.md         ✅ Tools crate documentation
+│   │   ├── src/
+│   │   │   ├── lib.rs        ✅ Main library module declarations.
+│   │   │   ├── error.rs      ✅ Shared BitNetError type.
+│   │   │   ├── hf_loader.rs  ✅ Hugging Face model download utility.
+│   │   │   ├── constants.rs  ✅ Workspace constants.
+│   │   │   ├── combine.rs    ✅ File combination logic.
+│   │   │   ├── test_utils.rs ✅ Test reporting utility (`TestReporter`).
+│   │   │   └── bin/
+│   │   │       ├── download_model.rs ✅ CLI tool to download models.
+│   │   │       └── combine_files.rs  ✅ CLI tool to combine files.
+│   │   └── gui_combiner/
+│   │       ├── Cargo.toml    ✅ GUI sub-crate manifest
+│   │       └── src/
+│   │           └── main.rs   ✅ GUI entry point for file combiner.
+│   │
+│   ├── bitnet-test-utils/
+│   │   └── src/
+│   │       └── lib.rs        ✅ TestReporter utility for robust test reporting.
+│   │
+│   └── bitnet-wasm/
+│       ├── Cargo.toml        ✅ WASM crate manifest
+│       ├── README.md         ✅ WASM crate documentation
 │       ├── src/
-│       │   ├── lib.rs        ✅ Main library module declarations.
-│       │   ├── error.rs      ✅ Shared BitNetError type.
-│       │   ├── hf_loader.rs  ✅ Hugging Face model download utility.
-│       │   ├── constants.rs  ✅ Workspace constants.
-│       │   ├── combine.rs    ✅ File combination logic.
-│       │   ├── test_utils.rs ✅ Test reporting utility (`TestReporter`).
-│       │   └── bin/
-│       │       ├── download_model.rs ✅ CLI tool to download models.
-│       │       └── combine_files.rs  ✅ CLI tool to combine files.
-│       └── gui_combiner/
-│           ├── Cargo.toml    ✅ GUI sub-crate manifest
-│           └── src/
-│               └── main.rs   ✅ GUI entry point for file combiner.
+│       │   ├── lib.rs        ✅ WASM library entry point
+│       │   ├── api.rs        ✅ WASM API bridge
+│       │   ├── bin/
+│       │   │   └── server.rs ✅ Dev server for local testing
+│       │   └── tests.rs      ✅ WASM/browser test implementations
+│       └── static/
+│           ├── index.html    ✅ Demo web page
+│           ├── style.css     ✅ Demo styles
+│           ├── main.js       ✅ Demo JS
+│           └── pkg/          ✅ WASM build output
 
 ```
 

@@ -36,6 +36,10 @@ A collection of essential utilities for BitNet projects, including a universal f
 
 ## Universal File Combiner
 
+![Universal File Combiner GUI](ScreenshotCombiner.png)
+
+*Screenshot: Universal File Combiner GUI preview mode, showing project file tree and combine options.*
+
 - **GUI**: Hierarchical file explorer, selection, preview, and combine (see `gui_combiner/`)
 - **CLI**: Combine files from a directory with flexible options
 - **Always ignores**: Files ending with `_combined.txt` to avoid recursive combining
@@ -95,4 +99,3 @@ cargo run --release
 
 ## License
 
-MIT 

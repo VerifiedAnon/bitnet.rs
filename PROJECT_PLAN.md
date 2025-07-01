@@ -18,19 +18,24 @@ Below is the up-to-date structure of the BitNet-rs repository. Each file and dir
 ```text
 bitnet-rs/
 ├── Cargo.toml                 # Workspace definition for all crates
-├── .cargo/
-│   └── config.toml            # Cargo alias for file combiner
 ├── .workspace_root            # Marker for workspace root
 ├── README.md                  # Project overview, build, usage, and structure
 ├── CHECKLIST.md               # Implementation status and TODOs
 ├── PROJECT_PLAN.md            # Detailed project plan and architecture
+├── Makefile                   # Project-wide build helpers
 ├── src/
 │   └── main.rs                # Workspace-level entry point/test harness
 ├── custom-kernel-test/
-│   ├── README.md              # Standalone kernel validation/prototyping
-│   ├── Cargo.toml             # Minimal test workspace
-│   ├── src/                   # Kernel test code
-│   └── tests/                 # Kernel test cases
+│   ├── README.md
+│   ├── Cargo.toml
+│   ├── src/
+│   │   ├── lib.rs
+│   │   └── test_utils.rs
+│   ├── tests/
+│   │   ├── add_scalar_corrected.wgsl
+│   │   ├── bitnet_kernel.wgsl
+│   │   ├── consts.rs
+│   │   └── custom_kernel.rs
 ├── crates/
 │   ├── bitnet-core/
 │   │   ├── Cargo.toml
@@ -48,20 +53,29 @@ bitnet-rs/
 │   │   │   ├── training.rs
 │   │   │   ├── visualization.rs
 │   │   │   ├── kernels.rs
-│   │   │   └── wgpu_context.rs
-│   │   │       ├── bitnet_kernel.wgsl
-│   │   │       └── README.md
+│   │   │   ├── pipeline.rs
+│   │   │   ├── error.rs
+│   │   │   ├── rope.rs
+│   │   │   ├── wgpu_context.rs
+│   │   │   ├── bitnetcore_test_utils.rs
+│   │   │   ├── gui/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── dashboard.rs
+│   │   │   │   ├── weights_viewer.rs
+│   │   │   │   ├── kernel_profiler.rs
+│   │   │   │   ├── attention_map.rs
+│   │   │   │   └── README.md
+│   │   │   ├── kernels/
+│   │   │   │   ├── bitnet_kernel.wgsl
+│   │   │   │   ├── bitnet_kernel_optimal.wgsl
+│   │   │   │   ├── bitnet_kernel_wasm.wgsl
+│   │   │   │   └── README.md
 │   │   ├── tests/
 │   │   │   ├── pipeline_integration.rs
 │   │   │   ├── pipeline_validation.rs
-│   │   │   └── kernel_tests.rs
-│   │   └── gui/
-│   │       ├── mod.rs
-│   │       ├── dashboard.rs
-│   │       ├── weights_viewer.rs
-│   │       ├── kernel_profiler.rs
-│   │       ├── attention_map.rs
-│   │       └── README.md
+│   │   │   ├── kernel_tests.rs
+│   │   │   ├── kernel_tests_fastest.rs
+│   │   │   └── DX12_test.rs
 │   ├── bitnet-converter/
 │   │   ├── Cargo.toml
 │   │   ├── README.md
@@ -76,36 +90,66 @@ bitnet-rs/
 │   ├── bitnet-app/
 │   │   ├── Cargo.toml
 │   │   ├── README.md
-│   │   └── src/
-│   │       ├── main.rs
-│   │       ├── cli.rs
-│   │       ├── generation.rs
-│   │       ├── sampler.rs
-│   │       └── gui/
-│   │           ├── mod.rs
-│   │           ├── app.rs
-│   │           ├── state.rs
-│   │           ├── backend.rs
-│   │           └── README.md
-│   └── bitnet-tools/
-│       ├── Cargo.toml
-│       ├── README.md
-│       ├── src/
-│       │   ├── lib.rs
-│       │   ├── constants.rs
-│       │   ├── error.rs
-│       │   ├── combine.rs
-│       │   ├── hf_loader.rs
-│       │   └── test_utils.rs
-│       └── gui_combiner/
-│           ├── Cargo.toml
-│           └── src/
-│               └── main.rs
+│   │   ├── src/
+│   │   │   ├── main.rs
+│   │   │   ├── cli.rs
+│   │   │   ├── generation.rs
+│   │   │   ├── sampler.rs
+│   │   │   ├── gui/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── app.rs
+│   │   │   │   ├── state.rs
+│   │   │   │   ├── backend.rs
+│   │   │   │   └── README.md
+│   ├── bitnet-test-utils/
+│   │   ├── README.md
+│   │   ├── src/
+│   │   │   └── lib.rs
+│   ├── bitnet-tools/
+│   │   ├── Cargo.toml
+│   │   ├── README.md
+│   │   ├── src/
+│   │   │   ├── lib.rs
+│   │   │   ├── constants.rs
+│   │   │   ├── error.rs
+│   │   │   ├── combine.rs
+│   │   │   ├── hf_loader.rs
+│   │   │   ├── test_utils.rs
+│   │   │   ├── bin/
+│   │   │   │   ├── combine_files.rs
+│   │   │   │   └── download_model.rs
+│   │   ├── gui_combiner/
+│   │   │   ├── Cargo.toml
+│   │   │   └── src/
+│   │   │       └── main.rs
+│   ├── bitnet-wasm/
+│   │   ├── Cargo.toml
+│   │   ├── README.md
+│   │   ├── dev.sh
+│   │   ├── src/
+│   │   │   ├── api.rs
+│   │   │   ├── lib.rs
+│   │   │   ├── tests.rs
+│   │   │   ├── bin/
+│   │   │   │   └── server.rs
+│   │   ├── static/
+│   │   │   ├── index.html
+│   │   │   ├── main.js
+│   │   │   ├── style.css
+│   │   │   └── pkg/
 ├── models/
 │   ├── Original/              # Downloaded Hugging Face models
 │   └── Converted/             # BitNet-optimized, quantized models
-├── logs/                      # Conversion and run logs
-├── References/                # Official reference code, assets, and docs
+├── logs/
+│   ├── browser_test.md
+│   ├── dx12_test.md
+│   ├── kernel_tests_fastest.md
+│   ├── kernel_tests.md
+│   ├── official_parity_test.md
+│   ├── pipeline_integration.md
+│   ├── pipeline_validation.md
+│   └── serialization_test.md
+├── References/
 │   └── official/
 │       ├── gpu/
 │       ├── utils/
@@ -121,8 +165,6 @@ bitnet-rs/
 ├── safetensor_keys.txt        # Utility/output files
 └── ...                        # (other utility or temporary files)
 ```
-
-<!-- (The rest of the file-by-file breakdown and component descriptions should be updated to match this structure. Adjust comments and notes for accuracy. Remove references to non-existent directories like shaders/ if not present, and add new ones as needed.) -->
 
 ## File-by-File Purpose & Challenge Table
 

@@ -1,8 +1,8 @@
 # BitNet-rs
 
-> **🚀 Modular, blazing-fast Rust engine for BitNet LLMs — conversion, inference, and research, with streaming and GPU/CPU support.**
-
----
+> **⚠️ Disclaimer: This project is a work in progress!**
+>
+> BitNet-rs is under active development and not yet production-ready. While there are many tests and rapid progress, the codebase is evolving quickly and breaking changes are likely. **We are actively looking for contributors and help!** If you're interested in Rust, LLMs, or kernel development, please join us—see [Contributing](#contributing) below.
 
 ![Rust 2021](https://img.shields.io/badge/Rust-2021-orange)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
@@ -14,15 +14,15 @@
 ## Features
 
 - ⚡ **Pure Rust** — No Python or C++ runtime dependencies
-- 🧩 **Modular** — Core, converter, tools, and app crates
+- 🧩 **Modular** — [Core](crates/bitnet-core/README.md), [Converter](crates/bitnet-converter/README.md), [Tools](crates/bitnet-tools/README.md), [App](crates/bitnet-app/README.md), and [WASM](crates/bitnet-wasm/README.md) crates
 - 🖥️ **CPU & GPU** — SIMD and WGSL (via wgpu) support
 - 📦 **Streaming/blockwise** model loading and inference
 - 🛠️ **Model conversion** — HuggingFace to BitNet format
 - 🔄 **Quantization** — B1.58 ternary weights
-- 🎯 **Optimized** — SIMD, LUT, and GPU kernels
+- 🎯 **Optimized** — SIMD, LUT, and GPU kernels ( DX12 Naga fixed )
 - 🎨 **GUI & CLI** — Interactive and scriptable interfaces
 - 🔍 **Visualization** — Attention maps and kernel profiling
-- 🌐 **WASM-ready** — (Experimental)
+- 🌐 **WASM-ready**
 - 🎯 **[Vibe Coding Ready](#vibe-coding)** — AI-assisted development with comprehensive planning i.e Project Plan, Checklist, and Cursor integration
 
 ---
@@ -142,7 +142,7 @@ cargo test -p bitnet-core --test kernel_tests -- --ignored --nocapture
 
 The `performance_benchmark_gpu_vs_scalar` test provides detailed performance metrics. When you run it, you will see output like this:
 
-```
+```text
 Performance Benchmark (100 iterations):
   GPU (Wall Time):    Avg: 290.000µs | Total: 29.000ms
   GPU (Kernel Time):  Avg: 15.000µs  | Total: 1.500ms
@@ -151,24 +151,29 @@ Speedup (Wall vs Scalar):   1.65x
 Speedup (Kernel vs Scalar): 32.00x
 ```
 
-*   **GPU (Wall Time)**: Total time from the CPU's perspective, including overhead for buffer management and data transfer.
-*   **GPU (Kernel Time)**: The pure GPU execution time, measured with high-precision timestamp queries. This is the best measure of the kernel's raw performance.
-*   **Scalar (CPU Time)**: The performance of the equivalent non-parallelized CPU implementation.
-*   **Speedup (Kernel vs Scalar)**: This shows the true speedup of the GPU kernel over the CPU implementation. This is the most important metric for performance analysis.
+**GPU (Wall Time)**: Total time from the CPU's perspective, including overhead for buffer management and data transfer.
+**GPU (Kernel Time)**: The pure GPU execution time, measured with high-precision timestamp queries. This is the best measure of the kernel's raw performance.
+**Scalar (CPU Time)**: The performance of the equivalent non-parallelized CPU implementation.
+**Speedup (Kernel vs Scalar)**: This shows the true speedup of the GPU kernel over the CPU implementation. This is the most important metric for performance analysis.
 
-*(Note: The numbers above are illustrative. Please run the benchmarks on your own hardware to get accurate results.)*
+> Note: The numbers above are illustrative. Please run the benchmarks on your own hardware to get accurate results.
+
+---
 
 ## Known Issues
 
 ### DirectX 12 Backend
 
-*   **Issue**: The WGSL kernel can trigger a suspected loop-unrolling bug in the DirectX (DX12) shader compiler (FXC/DXC). This may cause tests to fail on Windows machines using the Dx12 backend.
-*   **Status**: **A robust workaround has been found and is now fully documented and tested.**
+**Issue**: The WGSL kernel can trigger a suspected loop-unrolling bug in the DirectX (DX12) shader compiler (FXC/DXC). This may cause tests to fail on Windows machines using the Dx12 backend.
+
+**Status**: **A robust workaround has been found and is now fully documented and tested.**
     - The workaround uses a flattened i32 accumulator and per-element decode for tile_b, avoiding the problematic WGSL patterns.
     - The full BitNet kernel logic now passes on DX12 with this fix.
     - See the [DX12 test report](logs/dx12_test.md) for the special finding and full details.
-*   **Reference**: See the related [Naga issue](https://github.com/gfx-rs/naga/issues/1832) for more details.
-*   **Legacy note**: The `cross_device_consistency_test` previously skipped the Dx12 backend, but with the workaround, DX12 is now supported for the full kernel logic.
+
+**Reference**: See the related [Naga issue](https://github.com/gfx-rs/naga/issues/1832) for more details.
+
+**Legacy note**: The `cross_device_consistency_test` previously skipped the Dx12 backend, but with the workaround, DX12 is now supported for the full kernel logic.
 
 ### DX12 Regression Testing
 
@@ -176,9 +181,11 @@ To ensure the DX12 workaround remains effective and to prevent regressions:
 
 - The file [`crates/bitnet-core/tests/DX12_test.rs`](crates/bitnet-core/tests/DX12_test.rs) is a comprehensive diagnostic and regression test suite for the DX12 WGSL bug.
 - **To run the regression test:**
+
   ```sh
   cargo test --package bitnet-core --test DX12_test -- --nocapture
   ```
+
 - This will generate a detailed report at [`logs/dx12_test.md`](logs/dx12_test.md).
 - **Check the report:**
   - Look for the ⭐ **Special Finding** section, which highlights the test demonstrating the robust workaround.
@@ -775,7 +782,16 @@ The key was leveraging each AI's strengths:
 
 - [Official BitNet repo (Microsoft)](https://github.com/microsoft/BitNet)
 - See `References/official/` for CUDA, Python, and kernel reference code.
-- See crate-level READMEs for detailed module documentation.
+
+---
+
+## Crate Overview
+
+- [bitnet-core](crates/bitnet-core/README.md): Core engine and kernels
+- [bitnet-converter](crates/bitnet-converter/README.md): Model conversion tools
+- [bitnet-tools](crates/bitnet-tools/README.md): Utilities and file combiners
+- [bitnet-app](crates/bitnet-app/README.md): CLI and GUI application
+- [bitnet-wasm](crates/bitnet-wasm/README.md): WASM bindings and web support
 
 ---
 
