@@ -42,7 +42,7 @@ fn main() {
     let output_dir = args.output_dir.unwrap_or_else(|| {
         models_root().join(CONVERTED_DIR).join(default_model_subdir).to_string_lossy().to_string()
     });
-    match convert_model_on_disk(&input_dir, &output_dir) {
+    match convert_model_on_disk(&input_dir, &output_dir, false) {
         Ok(output_file) => {
             log::info!("\n✅ Conversion successful!");
             log::info!("Converted model saved in: {}", output_file.display());

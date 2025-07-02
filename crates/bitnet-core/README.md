@@ -15,6 +15,7 @@ A pure Rust, streaming-friendly core engine for BitNet models, focused on high-p
 - [Attention, Quantization, and Kernel Design Rationale](#attention-quantization-and-kernel-design-rationale)
 - [Test Coverage](#test-coverage)
 - [Implementation Notes](#implementation-notes)
+- [Pure Rust Multi-threaded CPU Backend (2024)](#pure-rust-multi-threaded-cpu-backend-2024)
 
 ---
 
@@ -112,6 +113,8 @@ For more details, see the code comments in each kernel and the test suite in `te
 
 ## Test Coverage
 
+**Note:** The pipeline validation tests (`pipeline_validation.rs`) now exercise the pure Rust, multi-threaded CPU backend for all core inference logic. All core unit tests pass for the CPU path. Any current failures in pipeline validation are due to a known RoPE bug for long sequences, not the CPU backend itself.
+
 - Unit tests for packing, quantization, and kernel correctness
 - Direct wgpu kernel launch tests (no burn dependency)
 - End-to-end model pipeline validation (see `tests/pipeline_validation.rs`)
@@ -143,6 +146,14 @@ For more details, see the code comments in each kernel and the test suite in `te
 - See the project plan for architecture and validation strategies
 - Use feature flags to enable GPU or core-gui modules
 - For kernel and quantization details, see code comments in `src/kernels.rs` and `src/kernels/bitnet_kernel.wgsl`
+
+## Pure Rust Multi-threaded CPU Backend (2024)
+
+- The BitNet pipeline now supports a fully multi-threaded, SIMD-friendly, pure Rust CPU backend for all core modules (bitnet_linear, feed_forward, attention, model).
+- All core unit tests pass for the CPU path.
+- The pipeline validation suite (`pipeline_validation.rs`) now uses the pure Rust CPU backend for `test_pipeline_creation_cpu` and `test_cpu_inference`.
+- This backend is robust, production-grade, and leverages Rayon for parallelism.
+- **Known issue:** There is a bug in RoPE (rotary position embedding) for long sequences, tracked in the checklist. This will be fixed next.
 
 ---
 

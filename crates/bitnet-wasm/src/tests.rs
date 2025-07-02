@@ -1,6 +1,5 @@
 use std::str::FromStr;
 use wasm_bindgen::JsValue;
-use wasm_bindgen_futures::JsFuture;
 
 #[derive(Debug)]
 pub enum GpuTestError {

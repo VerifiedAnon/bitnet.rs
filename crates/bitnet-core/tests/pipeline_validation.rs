@@ -31,13 +31,14 @@
 //! - test_pipeline_creation: Runs both subtests and generates a summary table in the report.
 
 use bitnet_tools::test_utils::TestReporter;
-use bitnet_core::pipeline::{Pipeline, PipelineOptions};
+use bitnet_core::pipeline::{Pipeline, PipelineOptions, PipelineBackend};
 use sysinfo::System;
 use std::time::Instant;
 use serial_test::serial;
-use wgpu;
 use bitnet_core::settings::InferenceSettings;
 use lazy_static::lazy_static;
+use rayon::ThreadPoolBuilder;
+use num_cpus;
 
 struct GoldenCase<'a> {
     prompt: &'a str,
@@ -70,7 +71,7 @@ fn test_pipeline_creation_cpu() {
             input_dir: None,
             output_dir: None,
             reporter: None,
-            backend: Some(wgpu::Backends::GL), // CPU-like fallback
+            backend: PipelineBackend::Cpu,
             settings: None,
         };
         let mut sys = System::new_all();
@@ -110,7 +111,7 @@ fn test_pipeline_creation_gpu() {
             input_dir: None,
             output_dir: None,
             reporter: None,
-            backend: Some(wgpu::Backends::VULKAN | wgpu::Backends::DX12 | wgpu::Backends::METAL),
+            backend: PipelineBackend::Gpu,
             settings: None,
         };
         let mut sys = System::new_all();
@@ -163,10 +164,10 @@ fn test_model_ready() {
             input_dir: None,
             output_dir: None,
             reporter: None,
-            backend: None,
+            backend: PipelineBackend::Auto,
             settings: None,
         };
-        let pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
+        let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
         let t2 = Instant::now();
         match pipeline.ensure_model_ready().await {
             Ok(_) => reporter.log_message(2, "ensure_model_ready succeeded"),
@@ -185,18 +186,21 @@ fn test_model_ready() {
 #[serial]
 #[ignore]
 fn test_cpu_inference() {
+    ThreadPoolBuilder::new().num_threads(num_cpus::get()).build_global().ok();
+    println!("[BitNet] [CPU] Rayon thread pool size: {}", rayon::current_num_threads());
     let reporter = &*TEST_REPORTER;
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
+        let settings = InferenceSettings::default().with_max_new_tokens(1);
         let options = PipelineOptions {
             model_id: None,
             input_dir: None,
             output_dir: None,
             reporter: None,
-            backend: Some(wgpu::Backends::GL), // Use GL for CPU-like fallback (or None for default)
-            settings: None,
+            backend: PipelineBackend::Cpu,
+            settings: Some(settings.clone()),
         };
-        let pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
+        let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
         pipeline.ensure_model_ready().await.expect("Failed to prepare model");
         for (i, case) in golden_cases().iter().enumerate() {
             let t4 = Instant::now();
@@ -217,7 +221,13 @@ fn test_cpu_inference() {
                 reporter.record_failure(&format!("CPU Inference (case {i})"), "Logits contain NaN or Infinity", None);
             }
             if result.top_token != case.expected_top_token {
-                reporter.record_failure(&format!("CPU Inference (case {i})"), &format!("Golden output mismatch: expected '{}', got '{}'", case.expected_top_token, result.top_token), None);
+                reporter.record_failure(&format!("CPU Inference (case {i})"), &format!("Golden output mismatch: expected '{}' , got '{}'", case.expected_top_token, result.top_token), None);
+            }
+            // Log why generation stopped
+            if result.stopped_by_eos {
+                reporter.log_message(3, "[GENERATION] Stopped by EOS token");
+            } else if result.stopped_by_max_tokens {
+                reporter.log_message(3, "[GENERATION] Stopped by max_tokens");
             }
         }
         drop(pipeline);
@@ -237,16 +247,10 @@ fn test_gpu_inference() {
             input_dir: None,
             output_dir: None,
             reporter: None,
-            backend: Some(wgpu::Backends::VULKAN | wgpu::Backends::DX12 | wgpu::Backends::METAL | wgpu::Backends::GL),
+            backend: PipelineBackend::Gpu,
             settings: None,
         };
-        let pipeline = match Pipeline::new(options).await {
-            Ok(p) => p,
-            Err(e) => {
-                reporter.record_failure("GPU Inference", &format!("Failed to create pipeline: {e}"), None);
-                return;
-            }
-        };
+        let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
         if let Err(e) = pipeline.ensure_model_ready().await {
             reporter.record_failure("GPU Inference", &format!("Failed to prepare model: {e}"), None);
             return;
@@ -290,10 +294,10 @@ fn test_performance_metrics() {
             input_dir: None,
             output_dir: None,
             reporter: None,
-            backend: Some(wgpu::Backends::GL),
+            backend: PipelineBackend::Cpu,
             settings: None,
         };
-        let pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
+        let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
         pipeline.ensure_model_ready().await.expect("Failed to prepare model");
         let prompt = "Performance test prompt.";
         let settings = InferenceSettings::default().with_max_new_tokens(32);
@@ -328,10 +332,10 @@ fn test_settings_integration() {
             input_dir: None,
             output_dir: None,
             reporter: None,
-            backend: Some(wgpu::Backends::GL),
+            backend: PipelineBackend::Cpu,
             settings: Some(settings.clone()),
         };
-        let pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
+        let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
         pipeline.ensure_model_ready().await.expect("Failed to prepare model");
         let prompt = "Settings integration test.";
         let result = pipeline.run_inference(prompt).await.expect("Inference failed");

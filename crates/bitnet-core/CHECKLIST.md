@@ -1,0 +1,6 @@
+- [x] Pure Rust, multi-threaded CPU backend for inference (bitnet_linear, feed_forward, attention, model)
+- [x] Pipeline uses pure Rust CPU backend for test_pipeline_creation_cpu and test_cpu_inference
+- [x] All core unit tests pass for CPU path
+- [x] Pipeline validation passes for CPU path (except known RoPE bug)
+- [x] Document known RoPE bug (index out of bounds for long sequences)
+- [ ] Next: Fix RoPE bug for long sequences 

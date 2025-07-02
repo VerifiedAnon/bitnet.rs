@@ -53,6 +53,7 @@ use crate::bitnet_linear::BitLinear;
 use crate::rope::RotaryEmbedding;
 use crate::wgpu_context::WgpuContext;
 use bitnet_converter::packer::BitLinearRecord;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Configuration for the Attention layer.
 #[derive(Debug, Clone)]
@@ -307,6 +308,127 @@ impl Attention {
             AttentionDevice::Cpu,
         ).await
     }
+
+    /// Performs a forward pass through the attention layer using pure Rust (CPU, multi-threaded).
+    pub fn cpu_forward(
+        &mut self,
+        x: &[f32],
+        pos_offset: usize,
+        cache: Option<&mut crate::attention::KVCache>,
+    ) -> Vec<f32> {
+        // Use config values, not assumptions
+        let hidden_size = self.num_heads * self.head_dim;
+        let seq_len = x.len() / hidden_size;
+        // Project Q, K, V
+        let q = self.q_proj.forward_cpu(x, 1);
+        let k_raw = self.k_proj.forward_cpu(x, 1);
+        let v_raw = self.v_proj.forward_cpu(x, 1);
+        // Repeat K and V as needed to match Q's head count (BitNet spec, see packer.rs)
+        let k = if self.num_heads == self.num_kv_heads {
+            k_raw.clone()
+        } else {
+            repeat_kv(&k_raw, self.num_heads / self.num_kv_heads, self.num_kv_heads, seq_len, self.head_dim)
+        };
+        let v = if self.num_heads == self.num_kv_heads {
+            v_raw.clone()
+        } else {
+            repeat_kv(&v_raw, self.num_heads / self.num_kv_heads, self.num_kv_heads, seq_len, self.head_dim)
+        };
+        let log_count = ATTENTION_LOG_CALLS.fetch_add(1, Ordering::Relaxed);
+        if log_count < 2 {
+            println!(
+                "[BitNet][Attention] num_heads={}, num_kv_heads={}, head_dim={}, seq_len={}, q.len()={}, k.len={}, v.len={}, x.len={}, hidden_size={}",
+                self.num_heads, self.num_kv_heads, self.head_dim, seq_len, q.len(), k.len(), v.len(), x.len(), hidden_size
+            );
+        }
+        // Reshape q and k if needed
+        let expected = self.num_heads * seq_len * self.head_dim;
+        let mut q_rope = if q.len() == expected {
+            q.clone()
+        } else if q.len() == seq_len * hidden_size {
+            // Reshape: [seq_len, hidden_size] -> [num_heads, seq_len, head_dim]
+            let mut reshaped = vec![0.0; expected];
+            for s in 0..seq_len {
+                for h in 0..self.num_heads {
+                    let src_offset = s * hidden_size + h * self.head_dim;
+                    let dst_offset = h * seq_len * self.head_dim + s * self.head_dim;
+                    reshaped[dst_offset..dst_offset + self.head_dim]
+                        .copy_from_slice(&q[src_offset..src_offset + self.head_dim]);
+                }
+            }
+            reshaped
+        } else {
+            panic!("[BitNet][Attention] Unexpected q shape: got {}, expected {} or {}", q.len(), expected, seq_len * hidden_size);
+        };
+        let mut k_rope = if k.len() == expected {
+            k.clone()
+        } else if k.len() == seq_len * hidden_size {
+            let mut reshaped = vec![0.0; expected];
+            for s in 0..seq_len {
+                for h in 0..self.num_heads {
+                    let src_offset = s * hidden_size + h * self.head_dim;
+                    let dst_offset = h * seq_len * self.head_dim + s * self.head_dim;
+                    reshaped[dst_offset..dst_offset + self.head_dim]
+                        .copy_from_slice(&k[src_offset..src_offset + self.head_dim]);
+                }
+            }
+            reshaped
+        } else {
+            panic!("[BitNet][Attention] Unexpected k shape: got {}, expected {} or {}", k.len(), expected, seq_len * hidden_size);
+        };
+        self.rotary_emb.forward(&mut q_rope, self.num_heads, seq_len, pos_offset);
+        self.rotary_emb.forward(&mut k_rope, self.num_heads, seq_len, pos_offset);
+        // 3. Compute attention (scaled dot-product, softmax, matmul)
+        let mut output = vec![0.0; seq_len * self.num_heads * self.head_dim];
+        // For each head, compute attention
+        for h in 0..self.num_heads {
+            for q_pos in 0..seq_len {
+                // Q vector
+                let q_offset = (h * seq_len + q_pos) * self.head_dim;
+                let q_vec = &q_rope[q_offset..q_offset + self.head_dim];
+                // Compute scores
+                let mut scores = vec![0.0f32; seq_len];
+                let mut max_score = -1e30f32;
+                for k_pos in 0..seq_len {
+                    let k_offset = (h * seq_len + k_pos) * self.head_dim;
+                    let k_vec = &k_rope[k_offset..k_offset + self.head_dim];
+                    let mut dot = 0.0f32;
+                    for d in 0..self.head_dim {
+                        dot += q_vec[d] * k_vec[d];
+                    }
+                    let scale = 1.0 / (self.head_dim as f32).sqrt();
+                    let mut score = dot * scale;
+                    if k_pos > q_pos {
+                        score = -1e30;
+                    }
+                    scores[k_pos] = score;
+                    if score > max_score {
+                        max_score = score;
+                    }
+                }
+                // Softmax
+                let mut sum_exp = 0.0f32;
+                for k_pos in 0..seq_len {
+                    scores[k_pos] = (scores[k_pos] - max_score).exp();
+                    sum_exp += scores[k_pos];
+                }
+                // Output
+                for d in 0..self.head_dim {
+                    let mut out = 0.0f32;
+                    for k_pos in 0..seq_len {
+                        let v_offset = (h * seq_len + k_pos) * self.head_dim;
+                        let v_val = v[v_offset + d];
+                        let weight = scores[k_pos] / sum_exp;
+                        out += weight * v_val;
+                    }
+                    let out_offset = (h * seq_len + q_pos) * self.head_dim + d;
+                    output[out_offset] = out;
+                }
+            }
+        }
+        // 4. Output projection
+        self.o_proj.forward_cpu(&output, 1)
+    }
 }
 
 // --- CPU-based helper functions for validation ---
@@ -439,3 +561,5 @@ mod tests {
         assert_eq!(output.len(), batch_size * seq_len * config.hidden_size);
     }
 }
+
+static ATTENTION_LOG_CALLS: AtomicUsize = AtomicUsize::new(0);

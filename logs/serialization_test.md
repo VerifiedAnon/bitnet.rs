@@ -1,25 +1,21 @@
 # SERIALIZATION_TEST Test Report
 
-> Generated on: 2025-06-30 23:26:38
+> Generated on: 2025-07-01 23:20:53
 
 ## Test Results
 
 | No. | Test Name | Status | Time Taken | Error Message |
 |:---:|:----------|:------:|:----------:|:-------------|
-|  1 | Block Streaming Serialization                      | ✅ Pass |    8.00 ms |             |
-|  2 | Full Model Serialization                           | ✅ Pass |   15.00 ms |             |
-|  3 | Streaming Multiple Blocks                          | ✅ Pass |   12.00 ms |             |
+|  1 | Real Model Safetensors Roundtrip                   | ✅ Pass | 239.58 sec |             |
 
 <details>
 <summary>📝 View Full Log Dump</summary>
 
 ```
-[2025-06-30, 23:26:38.208] -> Running test_full_model_serialization...
-[2025-06-30, 23:26:38.222] -> Full model serialization/deserialization works.
-[2025-06-30, 23:26:38.223] -> Running test_block_streaming_serialization...
-[2025-06-30, 23:26:38.231] -> Block streaming serialization/deserialization works.
-[2025-06-30, 23:26:38.232] -> Running test_streaming_multiple_blocks...
-[2025-06-30, 23:26:38.245] -> Streaming multiple blocks as separate files works.
+[2025-07-01, 23:16:53.594] -> [CPU] Rayon thread pool size: 24
+[2025-07-01, 23:16:53.595] -> Running test_real_model_safetensors_roundtrip...
+[2025-07-01, 23:19:57.136] -> [CONVERT] Wrote single-file model to: E:\Desktop\Bitnet rs\models\Converted\test_run\model.safetensors
+[2025-07-01, 23:20:53.169] -> [TIMING] Total roundtrip time: 239.58s
 ```
 
 </details>
@@ -29,14 +25,14 @@
 
 ### Test Statistics
 
-- **Total Tests:** 3
-- **Passed:** 3
+- **Total Tests:** 1
+- **Passed:** 1
 - **Failed:** 0
 
 ### Timing Information
 
-- **Total Time:** 0.04 sec
-- **Average Time:** 12.00 ms
+- **Total Time:** 239.58 sec
+- **Average Time:** 239578.00 ms
 
 ### Status
 

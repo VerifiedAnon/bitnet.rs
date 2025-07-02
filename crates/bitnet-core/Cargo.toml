@@ -30,7 +30,7 @@ serde_json = "1.0"
 hf-hub = { workspace = true }
 safetensors = { workspace = true }
 tokenizers = { workspace = true }
-thiserror = "1.0.57"
+thiserror = "2.0.12"
 log = { workspace = true }
 tracing = { workspace = true }
 bytemuck = { workspace = true, version = "1.12.3", features = ["derive"] }
@@ -48,12 +48,13 @@ memmap2 = "0.9"
 chrono = "0.4"
 lazy_static = "1.4.0"
 rayon = "1.8.1"
+num_cpus = "1.16"
+tempfile = "3"
+sysinfo = "0.35.2"
 
 [dev-dependencies]
 serial_test = "3.2.0"
-rayon = "1.8.1"
-tempfile = "3"
-sysinfo = "0.30"
+
 
 [features]
 default = ["gpu"]

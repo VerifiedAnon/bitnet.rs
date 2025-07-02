@@ -144,6 +144,13 @@ impl FeedForward {
         let x2 = relu_squared(&x1);
         self.w2.forward(context, &x2, batch_size).await
     }
+
+    /// Performs a forward pass through the feed-forward network using pure Rust (CPU, multi-threaded).
+    pub fn cpu_forward(&self, x: &[f32], batch_size: usize) -> Vec<f32> {
+        let x1 = self.w1.forward_cpu(x, batch_size);
+        let x2 = relu_squared(&x1);
+        self.w2.forward_cpu(&x2, batch_size)
+    }
 }
 
 /// Computes the Squared ReLU activation function: `max(0, x)^2`.

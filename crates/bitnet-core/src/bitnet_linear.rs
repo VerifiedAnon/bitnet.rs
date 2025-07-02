@@ -64,6 +64,7 @@ use crate::wgpu_context::WgpuContext;
 use bitnet_converter::packer::BitLinearRecord;
 use wgpu::util::DeviceExt;
 use futures_intrusive::channel::shared as channel;
+use rayon::prelude::*;
 
 /// Quantized linear layer using 1.58-bit weights.
 ///
@@ -289,6 +290,70 @@ impl BitLinear {
             // In a real app, this should return a proper error.
             panic!("Failed to map staging buffer");
         }
+    }
+
+    /// Performs a forward pass through the layer using pure Rust (CPU, multi-threaded, SIMD-friendly).
+    /// This is the reference implementation, matching the GPU kernel logic.
+    pub fn forward_cpu(
+        &self,
+        activations: &[f32],
+        batch_size: usize,
+    ) -> Vec<f32> {
+        let in_features = self.in_features;
+        let out_features = self.out_features;
+        let packed_per_row = (in_features + 15) / 16;
+        // Defensive: check shape validity
+        if self.packed_weights.len() < out_features * packed_per_row || self.weight_scales.len() < out_features {
+            eprintln!("[BitLinear::forward_cpu] Shape mismatch: packed_weights={}, expected={}, weight_scales={}, expected={}",
+                self.packed_weights.len(), out_features * packed_per_row, self.weight_scales.len(), out_features);
+            return vec![0.0; batch_size * out_features];
+        }
+        debug_assert_eq!(self.weight_scales.len(), out_features, "weight_scales shape mismatch");
+        debug_assert!(self.packed_weights.len() >= out_features * packed_per_row, "packed_weights shape mismatch");
+        let mut all_quantized_activations_i8: Vec<i8> = Vec::with_capacity(activations.len());
+        let mut all_activation_scales: Vec<f32> = Vec::with_capacity(batch_size);
+        for i in 0..batch_size {
+            let start = i * in_features;
+            let end = (i + 1) * in_features;
+            let activation_slice = &activations[start..end];
+            let (quantized_slice, scale) = crate::bitnet_linear::quantize_activations_scalar(activation_slice);
+            all_quantized_activations_i8.extend(quantized_slice);
+            all_activation_scales.push(scale);
+        }
+        // Scalar quantized matmul, parallel over batch
+        let mut output = vec![0.0; batch_size * out_features];
+        output.par_chunks_mut(out_features)
+            .enumerate()
+            .for_each(|(batch_idx, output_chunk)| {
+                let activation_scale = all_activation_scales[batch_idx];
+                let activations_start = batch_idx * in_features;
+                for out_idx in 0..out_features {
+                    let mut sum = 0i32;
+                    // Defensive: check bounds
+                    if out_idx >= self.weight_scales.len() { continue; }
+                    let weight_scale = self.weight_scales[out_idx];
+                    let weights_start = out_idx * packed_per_row;
+                    for k_idx in 0..packed_per_row {
+                        if weights_start + k_idx >= self.packed_weights.len() { continue; }
+                        let packed_weight = self.packed_weights[weights_start + k_idx];
+                        let act_base = activations_start + k_idx * 16;
+                        for bit_idx in 0..16 {
+                            let packed_bits = (packed_weight >> (bit_idx * 2)) & 0b11;
+                            let weight_val = match packed_bits {
+                                1 => 1i8,   // 01
+                                2 => -1i8,  // 10
+                                _ => 0i8,   // 00 or 11
+                            };
+                            // Bounds check for last chunk
+                            if act_base + bit_idx < all_quantized_activations_i8.len() {
+                                sum += (all_quantized_activations_i8[act_base + bit_idx] as i32) * (weight_val as i32);
+                            }
+                        }
+                    }
+                    output_chunk[out_idx] = (sum as f32) * activation_scale * weight_scale;
+                }
+            });
+        output
     }
 }
 

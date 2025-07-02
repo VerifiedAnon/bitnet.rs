@@ -181,6 +181,25 @@ impl Layer {
 
         Ok(final_output)
     }
+
+    /// Performs a forward pass through a transformer layer using pure Rust (CPU, multi-threaded).
+    pub fn cpu_forward(
+        &mut self,
+        x: &[f32],
+        pos_offset: usize,
+        cache: &mut KVCache,
+    ) -> Vec<f32> {
+        // Pre-attention normalization and residual connection
+        let x_norm = self.attention_norm.forward(x);
+        let attn_output = self.attn.cpu_forward(&x_norm, pos_offset, Some(cache));
+        let residual_after_attn: Vec<f32> = x.iter().zip(attn_output.iter()).map(|(a, b)| a + b).collect();
+        // Pre-feed-forward normalization and residual connection
+        let x_norm2 = self.ffn_norm.forward(&residual_after_attn);
+        let batch_size = x.len() / self.attention_norm.weight.len();
+        let ffn_output = self.ffn.cpu_forward(&x_norm2, batch_size);
+        let final_output: Vec<f32> = residual_after_attn.iter().zip(ffn_output.iter()).map(|(a, b)| a + b).collect();
+        final_output
+    }
 }
 
 /// The complete BitNet transformer model.
@@ -307,15 +326,22 @@ impl Transformer {
     /// - Required files are missing
     /// - Files are corrupted or in wrong format
     pub fn from_dir(dir: &Path, config: ModelConfig) -> Result<Self, BitNetError> {
+        use std::time::Instant;
+        println!("[BitNet] Loading model from {}", dir.display());
+        let t0 = Instant::now();
         let embedding_path = dir.join("embedding.bin");
         let embedding_bytes = fs::read(&embedding_path)?;
         let (embedding_record, _): (EmbeddingRecord, _) = decode_from_slice(&embedding_bytes, standard())?;
+        println!("[BitNet] Loaded embedding.bin in {:.2?}", t0.elapsed());
 
+        let t1 = Instant::now();
         let norm_path = dir.join("norm.bin");
         let norm_bytes = fs::read(&norm_path)?;
         let (norm_record, _): (RmsNormRecord, _) = decode_from_slice(&norm_bytes, standard())?;
         let norm = BitnetRmsNorm::from_record(norm_record);
+        println!("[BitNet] Loaded norm.bin in {:.2?}", t1.elapsed());
 
+        let t2 = Instant::now();
         // Output projection (lm_head)
         let output_path = dir.join("lm_head.bin");
         let output_bytes = fs::read(&output_path)?;
@@ -326,6 +352,7 @@ impl Transformer {
             in_features: lm_head_record.shape[1],
             out_features: lm_head_record.shape[0],
         };
+        println!("[BitNet] Loaded lm_head.bin in {:.2?}", t2.elapsed());
 
         let attn_config = AttentionConfig::new(
             config.hidden_size,
@@ -336,9 +363,11 @@ impl Transformer {
 
         let mut layers = Vec::new();
         for i in 0..config.num_hidden_layers {
+            let t_block = Instant::now();
             let block_path = dir.join(format!("block_{}.bin", i));
             let block_bytes = fs::read(&block_path)?;
             let (block_record, _): (TransformerBlockRecord, _) = decode_from_slice(&block_bytes, standard())?;
+            println!("[BitNet] Loaded block_{}.bin in {:.2?}", i, t_block.elapsed());
 
             // Split wqkv into Q, K, V BitLinearRecords using the unified function
             let (q_proj, k_proj, v_proj) = split_wqkv_record(&block_record.attention.wqkv, &attn_config);
@@ -419,6 +448,28 @@ impl Transformer {
         let logits = self.output.forward(context, &x_norm, 1).await;
         
         Ok(logits)
+    }
+
+    /// Performs a forward pass through the entire model for one token using pure Rust (CPU, multi-threaded).
+    pub fn cpu_forward(
+        &mut self,
+        token_id: usize,
+        pos: usize,
+        kv_caches: &mut [KVCache],
+    ) -> Vec<f32> {
+        // 1. Embedding lookup
+        let hidden_size = self.embedding_shape[1];
+        let start = token_id * hidden_size;
+        let mut x = self.embedding[start..start + hidden_size].to_vec();
+        // 2. Apply each transformer layer
+        for (i, layer) in self.layers.iter_mut().enumerate() {
+            x = layer.cpu_forward(&x, pos, &mut kv_caches[i]);
+        }
+        // 3. Final normalization
+        let x_norm = self.norm.forward(&x);
+        // 4. Final output projection (LM Head)
+        let logits = self.output.forward_cpu(&x_norm, 1);
+        logits
     }
 }
 
@@ -726,5 +777,21 @@ mod tests {
         // Now try to load the model
         let loaded = Transformer::from_dir(path, config.clone()).unwrap();
         assert_eq!(loaded.layers.len(), 0);
+    }
+
+    #[test]
+    fn test_cpu_forward_pass() {
+        let mut model = mini_model_config().init();
+        let mut kv_cache = vec![KVCache::default(); model.layers.len()];
+        let output = model.cpu_forward(0, 0, &mut kv_cache);
+        assert_eq!(output.len(), model.output.out_features);
+    }
+
+    #[test]
+    fn test_model_cpu_forward() {
+        let mut model = mini_dummy_transformer();
+        let mut kv_cache = vec![KVCache::default(); model.layers.len()];
+        let output = model.cpu_forward(0, 0, &mut kv_cache);
+        assert_eq!(output.len(), model.output.out_features);
     }
 }

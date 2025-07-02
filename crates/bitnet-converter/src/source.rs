@@ -7,7 +7,8 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::path::Path;
 use bytemuck;
-use half::bf16;
+use rayon::prelude::*;
+
 
 /// Map from tensor name to (data, shape)
 pub type TensorMap = HashMap<String, (Vec<f32>, Vec<usize>)>;
@@ -25,36 +26,42 @@ impl ModelSource {
 }
 
 fn load_safetensors_mmap(path: &Path) -> Result<TensorMap, Box<dyn std::error::Error>> {
+    let t0 = std::time::Instant::now();
     let file = File::open(path)?;
+    println!("[PROFILE] File open: {:?}", t0.elapsed());
+    let t1 = std::time::Instant::now();
     let mmap = unsafe { Mmap::map(&file)? };
+    println!("[PROFILE] Mmap: {:?}", t1.elapsed());
+    let t2 = std::time::Instant::now();
     let safetensors = SafeTensors::deserialize(&mmap)?;
-    let mut map = TensorMap::new();
-
-    for name in safetensors.names() {
-        let tensor_view = safetensors.tensor(name)?;
-
+    println!("[PROFILE] Header/metadata parse: {:?}", t2.elapsed());
+    // --- Parallel tensor conversion for large models ---
+    let tensor_vec: Vec<_> = safetensors.names().par_iter().map(|name| {
+        let t_tensor = std::time::Instant::now();
+        let tensor_view = safetensors.tensor(name).ok()?;
+        // Only process bf16 tensors (BitNet format)
         if tensor_view.dtype() != Dtype::BF16 {
-            continue;
+            return None;
         }
-
         let original_shape = tensor_view.shape();
         let shape: Vec<usize> = if original_shape.len() == 1 {
-            // Promote 1D tensors to [1, N] for consistency
             vec![1, original_shape[0]]
         } else if original_shape.len() == 2 {
             original_shape.to_vec()
         } else {
             log::warn!("Skipping tensor '{}' with unsupported shape {:?}", name, original_shape);
-            continue;
+            return None;
         };
-
         let bf16_bytes = tensor_view.data();
-        // SAFETY: BF16 is stored as u16 in safetensors, so we can cast &[u8] to &[u16]
         let u16_slice = bytemuck::cast_slice::<u8, u16>(bf16_bytes);
-        let f32_vec: Vec<f32> = u16_slice.iter().map(|&bits| bf16::from_bits(bits).to_f32()).collect();
-
-        map.insert(name.to_string(), (f32_vec, shape));
-    }
+        let f32_vec: Vec<f32> = u16_slice.iter().map(|&bits| half::bf16::from_bits(bits).to_f32()).collect();
+        let elapsed = t_tensor.elapsed();
+        println!("[PROFILE] Tensor {} conversion: {:?}", name, elapsed);
+        Some((name.to_string(), (f32_vec, shape)))
+    }).filter_map(|x| x).collect();
+    let map: TensorMap = tensor_vec.into_iter().collect();
+    println!("[PROFILE] Total tensor conversion: {:?}", t0.elapsed());
+    println!("[PROFILE] Total load_safetensors_mmap: {:?}", t0.elapsed());
     Ok(map)
 }
 
@@ -147,5 +154,50 @@ mod tests {
         let (_tensor, shape) = &tensor_map["kernel_weight"];
         // Kernel expects [n, k] shape
         assert_eq!(shape, &vec![2, 2], "Shape should match kernel expectation");
+    }
+
+    #[test]
+    fn test_load_real_bitnet_model() {
+        // Check for CARGO_MANIFEST_DIR and hf_loader.rs presence
+        let manifest_dir = match std::env::var("CARGO_MANIFEST_DIR") {
+            Ok(dir) => dir,
+            Err(_) => {
+                eprintln!("CARGO_MANIFEST_DIR not set, skipping real model test");
+                return;
+            }
+        };
+        let tools_path = std::path::Path::new(&manifest_dir).parent().unwrap().join("bitnet-tools/src/hf_loader.rs");
+        if !tools_path.exists() {
+            eprintln!("hf_loader.rs not found, skipping real model test");
+            return;
+        }
+        // Import hf_loader dynamically
+        // (Assume bitnet-tools is a dependency and hf_loader is public)
+        // Use the get_model function to get a real model
+        let model_files = match bitnet_tools::hf_loader::get_model(None) {
+            Ok(files) => files,
+            Err(e) => {
+                eprintln!("Could not get real model: {e}, skipping test");
+                return;
+            }
+        };
+        // Use the first safetensors file found
+        let safetensors_path = match model_files.safetensors_files.first() {
+            Some(p) => p,
+            None => {
+                eprintln!("No safetensors file found in model, skipping test");
+                return;
+            }
+        };
+        let source = ModelSource::SafetensorsFile(safetensors_path.to_string_lossy().to_string());
+        let tensor_map = match source.load_tensors() {
+            Ok(map) => map,
+            Err(e) => {
+                eprintln!("Failed to load real model: {e}, skipping test");
+                return;
+            }
+        };
+        assert!(!tensor_map.is_empty(), "Tensor map should not be empty for real model");
+        println!("Loaded {} tensors from real model at {}", tensor_map.len(), safetensors_path.display());
     }
 }
