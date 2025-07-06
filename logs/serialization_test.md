@@ -1,21 +1,21 @@
 # SERIALIZATION_TEST Test Report
 
-> Generated on: 2025-07-01 23:20:53
+> Generated on: 2025-07-02 18:17:24
 
 ## Test Results
 
 | No. | Test Name | Status | Time Taken | Error Message |
 |:---:|:----------|:------:|:----------:|:-------------|
-|  1 | Real Model Safetensors Roundtrip                   | ✅ Pass | 239.58 sec |             |
+|  1 | Real Model Safetensors Roundtrip                   | ✅ Pass |  72.08 sec |             |
 
 <details>
 <summary>📝 View Full Log Dump</summary>
 
 ```
-[2025-07-01, 23:16:53.594] -> [CPU] Rayon thread pool size: 24
-[2025-07-01, 23:16:53.595] -> Running test_real_model_safetensors_roundtrip...
-[2025-07-01, 23:19:57.136] -> [CONVERT] Wrote single-file model to: E:\Desktop\Bitnet rs\models\Converted\test_run\model.safetensors
-[2025-07-01, 23:20:53.169] -> [TIMING] Total roundtrip time: 239.58s
+[2025-07-02, 18:16:12.887] -> [CPU] Rayon thread pool size: 24
+[2025-07-02, 18:16:12.888] -> Running test_real_model_safetensors_roundtrip...
+[2025-07-02, 18:17:17.225] -> [CONVERT] Wrote quantized single-file model to: E:\Desktop\Bitnet rs\models\Converted\test_run\model.safetensors
+[2025-07-02, 18:17:24.968] -> [TIMING] Total roundtrip time: 72.08s
 ```
 
 </details>
@@ -31,8 +31,8 @@
 
 ### Timing Information
 
-- **Total Time:** 239.58 sec
-- **Average Time:** 239578.00 ms
+- **Total Time:** 72.08 sec
+- **Average Time:** 72082.00 ms
 
 ### Status
 

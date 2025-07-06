@@ -1,13 +1,15 @@
-// Optimized Pure Rust packer for BitNet converter
+//! Model quantization, packing, and serialization utilities for BitNet Converter.
+//!
+//! Provides optimized routines for quantizing, packing, and serializing model weights and metadata.
 
-use crate::source::TensorMap;
+use crate::source::{RichTensorMap, TensorData};
 use serde::{Serialize, Deserialize};
 use rayon::prelude::*;
 use thiserror::Error;
 use std::time::Instant;
 use half::bf16;
 use bytemuck;
-use safetensors::{tensor::TensorView, Dtype, serialize_to_file};
+use safetensors::{tensor::TensorView, serialize_to_file};
 use std::collections::BTreeMap;
 
 
@@ -15,33 +17,61 @@ use std::collections::BTreeMap;
 // Error Handling
 // ================================================================================================
 
+/// Error type for model conversion and packing operations.
 #[derive(Error, Debug)]
 pub enum ConversionError {
+    /// Required tensor is missing from the input.
     #[error("Missing required tensor: {tensor_name}")]
-    MissingTensor { tensor_name: String },
+    MissingTensor {
+        /// Name of the missing tensor.
+        tensor_name: String,
+    },
+    /// Tensor shape does not match expected dimensions.
     #[error("Invalid tensor shape for {tensor_name}: expected {expected:?}, got {actual:?}")]
-    InvalidShape { tensor_name: String, expected: Vec<usize>, actual: Vec<usize> },
+    InvalidShape {
+        /// Name of the tensor with invalid shape.
+        tensor_name: String,
+        /// Expected shape.
+        expected: Vec<usize>,
+        /// Actual shape found.
+        actual: Vec<usize>,
+    },
+    /// Weight count is not divisible by 16 (required for packing).
     #[error("Weight count {count} is not divisible by 16")]
-    InvalidWeightCount { count: usize },
+    InvalidWeightCount {
+        /// Number of weights found.
+        count: usize,
+    },
+    /// Ternary weight value is invalid (must be -1, 0, or 1).
     #[error("Invalid ternary weight value: {value}")]
-    InvalidTernaryWeight { value: i8 },
+    InvalidTernaryWeight {
+        /// The invalid ternary value encountered.
+        value: i8,
+    },
 }
 
-type ConvResult<T> = std::result::Result<T, ConversionError>;
+/// Result type for conversion operations.
+pub type ConvResult<T> = std::result::Result<T, ConversionError>;
 
 // ================================================================================================
 // Core Data Structures (with better validation)
 // ================================================================================================
 
+/// Packed linear layer weights and scales for BitNet.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BitLinearRecord {
+    /// Packed weights (ternary, 16 per u32).
     pub packed_weights: Vec<u32>,
+    /// Per-row scaling factors.
     pub weight_scales: Vec<f32>,
+    /// Number of input features.
     pub in_features: usize,
+    /// Number of output features.
     pub out_features: usize,
 }
 
 impl BitLinearRecord {
+    /// Validate the packed weights and shape.
     fn validate(&self) -> ConvResult<()> {
         let expected_packed_len = (self.out_features * self.in_features + 15) / 16;
         if self.packed_weights.len() != expected_packed_len {
@@ -55,52 +85,80 @@ impl BitLinearRecord {
     }
 }
 
+/// Packed RMSNorm weights and shape.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RmsNormRecord {
+    /// Norm weights.
     pub weight: Vec<f32>,
+    /// Shape of the norm tensor.
     pub shape: Vec<usize>,
 }
 
+/// Packed embedding weights and shape.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EmbeddingRecord {
+    /// Embedding weights.
     pub weight: Vec<f32>,
+    /// Shape of the embedding tensor.
     pub shape: Vec<usize>,
 }
 
+/// Packed attention layer record.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AttentionRecord {
+    /// Packed QKV weights and scales.
     pub wqkv: BitLinearRecord,
+    /// Packed output projection weights and scales.
     pub o_proj: BitLinearRecord,
 }
 
+/// Packed feed-forward layer record.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FeedForwardRecord {
+    /// Packed gate and up projection weights and scales.
     pub w13: BitLinearRecord,
+    /// Packed down projection weights and scales.
     pub w2: BitLinearRecord,
 }
 
+/// Packed transformer block record.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TransformerBlockRecord {
+    /// Attention layer record.
     pub attention: AttentionRecord,
+    /// Feed-forward layer record.
     pub feed_forward: FeedForwardRecord,
+    /// Attention norm record.
     pub attention_norm: RmsNormRecord,
+    /// Feed-forward norm record.
     pub ffn_norm: RmsNormRecord,
 }
 
+/// Top-level model record for BitNet.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BitNetModelRecord {
+    /// Embedding record.
     pub embedding: EmbeddingRecord,
+    /// All transformer blocks.
     pub blocks: Vec<TransformerBlockRecord>,
+    /// Final norm record.
     pub norm: RmsNormRecord,
+    /// LM head record.
     pub lm_head: EmbeddingRecord,
+    /// Model metadata.
     pub metadata: ModelMetadata,
 }
 
+/// Metadata for a BitNet model.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ModelMetadata {
+    /// Number of transformer layers.
     pub num_layers: usize,
+    /// Vocabulary size.
     pub vocab_size: usize,
+    /// Hidden size.
     pub hidden_size: usize,
+    /// Timestamp of conversion.
     pub conversion_timestamp: u64,
 }
 
@@ -174,7 +232,9 @@ fn quantize_row(row: &[f32], scale: f32, output: &mut [i8]) {
     quantize_row_fallback(row, scale, output);
 }
 
-// Optimized quantization with better memory management
+/// Optimized quantization with better memory management
+///
+/// Quantizes a tensor to 1.58-bit ternary weights and returns the quantized values and per-row scales.
 pub fn quantize_to_1_58_bit_optimized(tensor: &[f32], shape: &[usize]) -> (Vec<i8>, Vec<f32>) {
     let n = shape[0];
     let k = shape[1];
@@ -226,6 +286,7 @@ pub fn quantize_to_1_58_bit_optimized(tensor: &[f32], shape: &[usize]) -> (Vec<i
 // Optimized Packing with Better Error Handling
 // ================================================================================================
 
+/// Packs ternary weights into u32s for BitNet kernels.
 pub fn pack_ternary_weights_optimized(weights: &[i8]) -> ConvResult<Vec<u32>> {
     if weights.len() % 16 != 0 {
         // To make this more robust for models where K is not a multiple of 16,
@@ -276,7 +337,7 @@ struct LayerTensors {
 }
 
 impl LayerTensors {
-    fn extract_from_map(tensor_map: &mut TensorMap, layer_idx: usize) -> ConvResult<Self> {
+    fn extract_from_map(tensor_map: &mut RichTensorMap, layer_idx: usize) -> ConvResult<Self> {
         let keys = [
             ("q_proj", "self_attn.q_proj.weight"),
             ("k_proj", "self_attn.k_proj.weight"), 
@@ -288,26 +349,23 @@ impl LayerTensors {
             ("attn_norm", "input_layernorm.weight"),
             ("ffn_norm", "post_attention_layernorm.weight"),
         ];
-        
         let mut tensors = Vec::new();
-        
         for (_, suffix) in &keys {
             let key = format!("model.layers.{}.{}", layer_idx, suffix);
-            let tensor = tensor_map.remove(&key)
+            let (data, shape) = tensor_map.remove(&key)
                 .ok_or_else(|| ConversionError::MissingTensor { tensor_name: key })?;
-            tensors.push(tensor);
+            tensors.push((data, shape));
         }
-        
         Ok(LayerTensors {
-            q: tensors[0].0.clone(), q_shape: tensors[0].1.clone(),
-            k: tensors[1].0.clone(), k_shape: tensors[1].1.clone(),
-            v: tensors[2].0.clone(), v_shape: tensors[2].1.clone(),
-            wo: tensors[3].0.clone(), wo_shape: tensors[3].1.clone(),
-            gate: tensors[4].0.clone(), gate_shape: tensors[4].1.clone(),
-            up: tensors[5].0.clone(), up_shape: tensors[5].1.clone(),
-            w2: tensors[6].0.clone(), w2_shape: tensors[6].1.clone(),
-            attn_norm: tensors[7].0.clone(), attn_norm_shape: tensors[7].1.clone(),
-            ffn_norm: tensors[8].0.clone(), ffn_norm_shape: tensors[8].1.clone(),
+            q: tensors[0].0.as_f32_vec().ok_or_else(|| ConversionError::InvalidShape { tensor_name: keys[0].1.to_string(), expected: vec![], actual: vec![] })?.clone(), q_shape: tensors[0].1.clone(),
+            k: tensors[1].0.as_f32_vec().ok_or_else(|| ConversionError::InvalidShape { tensor_name: keys[1].1.to_string(), expected: vec![], actual: vec![] })?.clone(), k_shape: tensors[1].1.clone(),
+            v: tensors[2].0.as_f32_vec().ok_or_else(|| ConversionError::InvalidShape { tensor_name: keys[2].1.to_string(), expected: vec![], actual: vec![] })?.clone(), v_shape: tensors[2].1.clone(),
+            wo: tensors[3].0.as_f32_vec().ok_or_else(|| ConversionError::InvalidShape { tensor_name: keys[3].1.to_string(), expected: vec![], actual: vec![] })?.clone(), wo_shape: tensors[3].1.clone(),
+            gate: tensors[4].0.as_f32_vec().ok_or_else(|| ConversionError::InvalidShape { tensor_name: keys[4].1.to_string(), expected: vec![], actual: vec![] })?.clone(), gate_shape: tensors[4].1.clone(),
+            up: tensors[5].0.as_f32_vec().ok_or_else(|| ConversionError::InvalidShape { tensor_name: keys[5].1.to_string(), expected: vec![], actual: vec![] })?.clone(), up_shape: tensors[5].1.clone(),
+            w2: tensors[6].0.as_f32_vec().ok_or_else(|| ConversionError::InvalidShape { tensor_name: keys[6].1.to_string(), expected: vec![], actual: vec![] })?.clone(), w2_shape: tensors[6].1.clone(),
+            attn_norm: tensors[7].0.as_f32_vec().ok_or_else(|| ConversionError::InvalidShape { tensor_name: keys[7].1.to_string(), expected: vec![], actual: vec![] })?.clone(), attn_norm_shape: tensors[7].1.clone(),
+            ffn_norm: tensors[8].0.as_f32_vec().ok_or_else(|| ConversionError::InvalidShape { tensor_name: keys[8].1.to_string(), expected: vec![], actual: vec![] })?.clone(), ffn_norm_shape: tensors[8].1.clone(),
         })
     }
 }
@@ -384,9 +442,13 @@ fn pack_layer_optimized(tensors: LayerTensors) -> ConvResult<TransformerBlockRec
 // Main Conversion Functions with Better Architecture
 // ================================================================================================
 
+/// Configuration for model conversion.
 pub struct ConversionConfig {
+    /// Whether to use parallel processing for layer conversion.
     pub use_parallel: bool,
+    /// Whether to validate tensors during conversion.
     pub validate_tensors: bool,
+    /// Optional callback for reporting progress: (current_layer, total_layers).
     pub progress_callback: Option<Box<dyn Fn(usize, usize) + Send + Sync>>,
 }
 
@@ -400,8 +462,9 @@ impl Default for ConversionConfig {
     }
 }
 
+/// Converts a tensor map into a BitNetModelRecord using advanced options.
 pub fn convert_model_advanced(
-    mut tensor_map: TensorMap,
+    mut tensor_map: RichTensorMap,
     num_layers: usize,
     config: ConversionConfig,
 ) -> ConvResult<BitNetModelRecord> {
@@ -436,26 +499,58 @@ pub fn convert_model_advanced(
     })
 }
 
-fn extract_embedding(tensor_map: &mut TensorMap) -> ConvResult<EmbeddingRecord> {
-    let (weight, shape) = tensor_map.remove("model.embed_tokens.weight")
+fn extract_embedding(tensor_map: &mut RichTensorMap) -> ConvResult<EmbeddingRecord> {
+    let (data, shape) = tensor_map.remove("model.embed_tokens.weight")
         .ok_or_else(|| ConversionError::MissingTensor { 
             tensor_name: "model.embed_tokens.weight".to_string() 
         })?;
+    let weight = match data {
+        TensorData::F32(v) | TensorData::BF16(v) => v,
+        _ => return Err(ConversionError::InvalidShape {
+            tensor_name: "model.embed_tokens.weight".to_string(),
+            expected: vec![],
+            actual: vec![],
+        }),
+    };
     Ok(EmbeddingRecord { weight, shape })
 }
 
-fn extract_norm(tensor_map: &mut TensorMap) -> ConvResult<RmsNormRecord> {
-    let (weight, shape) = tensor_map.remove("model.norm.weight")
+fn extract_norm(tensor_map: &mut RichTensorMap) -> ConvResult<RmsNormRecord> {
+    let (data, shape) = tensor_map.remove("model.norm.weight")
         .ok_or_else(|| ConversionError::MissingTensor { 
             tensor_name: "model.norm.weight".to_string() 
         })?;
+    let weight = match data {
+        TensorData::F32(v) | TensorData::BF16(v) => v,
+        _ => return Err(ConversionError::InvalidShape {
+            tensor_name: "model.norm.weight".to_string(),
+            expected: vec![],
+            actual: vec![],
+        }),
+    };
     Ok(RmsNormRecord { weight, shape })
 }
 
-fn extract_lm_head(tensor_map: &mut TensorMap, embedding: &EmbeddingRecord) -> ConvResult<EmbeddingRecord> {
-    if let Some((weight, shape)) = tensor_map.remove("lm_head.weight") {
+fn extract_lm_head(tensor_map: &mut RichTensorMap, embedding: &EmbeddingRecord) -> ConvResult<EmbeddingRecord> {
+    if let Some((data, shape)) = tensor_map.remove("lm_head.weight") {
+        let weight = match data {
+            TensorData::F32(v) | TensorData::BF16(v) => v,
+            _ => return Err(ConversionError::InvalidShape {
+                tensor_name: "lm_head.weight".to_string(),
+                expected: vec![],
+                actual: vec![],
+            }),
+        };
         Ok(EmbeddingRecord { weight, shape })
-    } else if let Some((weight, shape)) = tensor_map.remove("output.weight") {
+    } else if let Some((data, shape)) = tensor_map.remove("output.weight") {
+        let weight = match data {
+            TensorData::F32(v) | TensorData::BF16(v) => v,
+            _ => return Err(ConversionError::InvalidShape {
+                tensor_name: "output.weight".to_string(),
+                expected: vec![],
+                actual: vec![],
+            }),
+        };
         Ok(EmbeddingRecord { weight, shape })
     } else {
         log::warn!("No lm_head.weight or output.weight found; using tied embeddings");
@@ -464,7 +559,7 @@ fn extract_lm_head(tensor_map: &mut TensorMap, embedding: &EmbeddingRecord) -> C
 }
 
 fn convert_layers_sequential(
-    tensor_map: &mut TensorMap,
+    tensor_map: &mut RichTensorMap,
     num_layers: usize,
     config: &ConversionConfig,
 ) -> ConvResult<Vec<TransformerBlockRecord>> {
@@ -483,7 +578,7 @@ fn convert_layers_sequential(
 }
 
 fn convert_layers_parallel(
-    tensor_map: &mut TensorMap,
+    tensor_map: &mut RichTensorMap,
     num_layers: usize,
     config: &ConversionConfig,
 ) -> ConvResult<Vec<TransformerBlockRecord>> {
@@ -513,9 +608,9 @@ fn convert_layers_parallel(
     Ok(blocks.into_iter().map(|(_, block)| block).collect())
 }
 
-// Convenience function for backward compatibility
+/// Convenience function for backward compatibility: converts a tensor map to a BitNetModelRecord.
 pub fn convert_model(
-    tensor_map: TensorMap,
+    tensor_map: RichTensorMap,
     num_layers: usize,
     use_parallel: bool,
 ) -> ConvResult<BitNetModelRecord> {
@@ -605,11 +700,10 @@ mod tests {
         assert_eq!(model.metadata.num_layers, 1);
     }
 
-    fn create_minimal_tensor_map() -> TensorMap {
+    fn create_minimal_tensor_map() -> RichTensorMap {
         let mut tensor_map = HashMap::new();
         let shape = vec![2, 16];
         let data = vec![0.1f32; 32];
-        
         let keys = [
             "model.embed_tokens.weight",
             "model.norm.weight", 
@@ -624,11 +718,9 @@ mod tests {
             "model.layers.0.input_layernorm.weight",
             "model.layers.0.post_attention_layernorm.weight",
         ];
-        
         for key in &keys {
-            tensor_map.insert(key.to_string(), (data.clone(), shape.clone()));
+            tensor_map.insert(key.to_string(), (TensorData::F32(data.clone()), shape.clone()));
         }
-        
         tensor_map
     }
 
@@ -647,23 +739,38 @@ mod tests {
     }
 }
 
-/// Quantize/pack all tensors in a TensorMap, preserving original keys for 1:1 safetensors export.
-/// Returns a BTreeMap<original_key, (Vec<u8>, Vec<usize>)> where Vec<u8> is bf16 or quantized bytes.
+/// Quantize and pack all tensors in a tensor map, preserving original keys for safetensors export.
 pub fn quantize_tensor_map_preserve_keys(
-    tensor_map: &crate::source::TensorMap,
+    tensor_map: &crate::source::RichTensorMap,
 ) -> std::collections::BTreeMap<String, (Vec<u8>, Vec<usize>)> {
     let mut out = std::collections::BTreeMap::new();
     for (key, (data, shape)) in tensor_map.iter() {
         // For now, just convert f32 to bf16 bytes (no quantization for simplicity)
         // If you want to quantize, add logic here per tensor type
-        let bf16_vec: Vec<bf16> = data.iter().map(|&f| bf16::from_f32(f)).collect();
-        let u16_vec: Vec<u16> = bf16_vec.iter().map(|b| b.to_bits()).collect();
-        let bytes = bytemuck::cast_slice(&u16_vec).to_vec();
-        out.insert(key.clone(), (bytes, shape.clone()));
+        if let Some(f32_data) = data.as_f32_vec() {
+            let bf16_vec: Vec<half::bf16> = f32_data.iter().map(|&f| half::bf16::from_f32(f)).collect();
+            let u16_vec: Vec<u16> = bf16_vec.iter().map(|b| b.to_bits()).collect();
+            let bytes = bytemuck::cast_slice(&u16_vec).to_vec();
+            out.insert(key.clone(), (bytes, shape.clone()));
+        } else if let TensorData::U32(u32_data) = data {
+            let bytes = bytemuck::cast_slice(&u32_data).to_vec();
+            out.insert(key.clone(), (bytes, shape.clone()));
+        } else if let TensorData::I32(i32_data) = data {
+            let bytes = bytemuck::cast_slice(&i32_data).to_vec();
+            out.insert(key.clone(), (bytes, shape.clone()));
+        } else if let TensorData::I8(i8_data) = data {
+            let bytes = bytemuck::cast_slice(&i8_data).to_vec();
+            out.insert(key.clone(), (bytes, shape.clone()));
+        } else if let TensorData::U8(u8_data) = data {
+            out.insert(key.clone(), (u8_data.clone(), shape.clone()));
+        } else {
+            log::warn!("quantize_tensor_map_preserve_keys: Skipping tensor '{}' with unsupported type", key);
+        }
     }
     out
 }
 
+/// Export a quantized BitNet model to a safetensors file.
 pub fn export_quantized_to_safetensors(
     model: &BitNetModelRecord,
     out_path: &std::path::Path,
@@ -709,54 +816,70 @@ pub fn export_quantized_to_safetensors(
         // Attention wqkv
         tensor_specs.push((
             format!("layers.{}.attention.wqkv.weight", i),
-            Dtype::U8,
+            Dtype::U32,
             vec![block.attention.wqkv.out_features, block.attention.wqkv.in_features / 16],
             bytemuck::cast_slice(&block.attention.wqkv.packed_weights).to_vec(),
         ));
         tensor_specs.push((
             format!("layers.{}.attention.wqkv.weight_scale", i),
-            Dtype::F32,
+            Dtype::BF16,
             vec![block.attention.wqkv.weight_scales.len()],
-            bytemuck::cast_slice(&block.attention.wqkv.weight_scales).to_vec(),
+            {
+                let bf16_vec: Vec<bf16> = block.attention.wqkv.weight_scales.iter().map(|&f| bf16::from_f32(f)).collect();
+                let u16_vec: Vec<u16> = bf16_vec.iter().map(|b| b.to_bits()).collect();
+                bytemuck::cast_slice(&u16_vec).to_vec()
+            },
         ));
         // Attention o_proj
         tensor_specs.push((
             format!("layers.{}.attention.wo.weight", i),
-            Dtype::U8,
+            Dtype::U32,
             vec![block.attention.o_proj.out_features, block.attention.o_proj.in_features / 16],
             bytemuck::cast_slice(&block.attention.o_proj.packed_weights).to_vec(),
         ));
         tensor_specs.push((
             format!("layers.{}.attention.wo.weight_scale", i),
-            Dtype::F32,
+            Dtype::BF16,
             vec![block.attention.o_proj.weight_scales.len()],
-            bytemuck::cast_slice(&block.attention.o_proj.weight_scales).to_vec(),
+            {
+                let bf16_vec: Vec<bf16> = block.attention.o_proj.weight_scales.iter().map(|&f| bf16::from_f32(f)).collect();
+                let u16_vec: Vec<u16> = bf16_vec.iter().map(|b| b.to_bits()).collect();
+                bytemuck::cast_slice(&u16_vec).to_vec()
+            },
         ));
         // FeedForward w13
         tensor_specs.push((
             format!("layers.{}.feed_forward.w13.weight", i),
-            Dtype::U8,
+            Dtype::U32,
             vec![block.feed_forward.w13.out_features, block.feed_forward.w13.in_features / 16],
             bytemuck::cast_slice(&block.feed_forward.w13.packed_weights).to_vec(),
         ));
         tensor_specs.push((
             format!("layers.{}.feed_forward.w13.weight_scale", i),
-            Dtype::F32,
+            Dtype::BF16,
             vec![block.feed_forward.w13.weight_scales.len()],
-            bytemuck::cast_slice(&block.feed_forward.w13.weight_scales).to_vec(),
+            {
+                let bf16_vec: Vec<bf16> = block.feed_forward.w13.weight_scales.iter().map(|&f| bf16::from_f32(f)).collect();
+                let u16_vec: Vec<u16> = bf16_vec.iter().map(|b| b.to_bits()).collect();
+                bytemuck::cast_slice(&u16_vec).to_vec()
+            },
         ));
         // FeedForward w2
         tensor_specs.push((
             format!("layers.{}.feed_forward.w2.weight", i),
-            Dtype::U8,
+            Dtype::U32,
             vec![block.feed_forward.w2.out_features, block.feed_forward.w2.in_features / 16],
             bytemuck::cast_slice(&block.feed_forward.w2.packed_weights).to_vec(),
         ));
         tensor_specs.push((
             format!("layers.{}.feed_forward.w2.weight_scale", i),
-            Dtype::F32,
+            Dtype::BF16,
             vec![block.feed_forward.w2.weight_scales.len()],
-            bytemuck::cast_slice(&block.feed_forward.w2.weight_scales).to_vec(),
+            {
+                let bf16_vec: Vec<bf16> = block.feed_forward.w2.weight_scales.iter().map(|&f| bf16::from_f32(f)).collect();
+                let u16_vec: Vec<u16> = bf16_vec.iter().map(|b| b.to_bits()).collect();
+                bytemuck::cast_slice(&u16_vec).to_vec()
+            },
         ));
         // Norms
         tensor_specs.push((
@@ -798,4 +921,14 @@ pub fn export_quantized_to_safetensors(
     }
     serialize_to_file(&tensors, &None, out_path).map_err(|e| Box::<dyn std::error::Error>::from(e))?;
     Ok(())
+}
+
+impl TensorData {
+    /// Returns a reference to the underlying f32 vector, if present.
+    pub fn as_f32_vec(&self) -> Option<&Vec<f32>> {
+        match self {
+            TensorData::F32(v) | TensorData::BF16(v) => Some(v),
+            _ => None,
+        }
+    }
 }

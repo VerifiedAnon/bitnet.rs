@@ -2,10 +2,12 @@
 
 use std::path::PathBuf;
 use bitnet_tools::hf_loader;
-use bitnet_tools::constants::{DEFAULT_MODEL_ID, original_dir, converted_dir, CONFIG_JSON};
-use bitnet_converter::convert_model_on_disk;
+use bitnet_tools::constants::{DEFAULT_MODEL_ID, converted_dir, CONFIG_JSON};
 use std::sync::Arc;
 use rayon::ThreadPoolBuilder;
+use crate::model::ModelFormat;
+use log;
+use bitnet_tools::logging;
 
 /// Backend device selection for the pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +36,10 @@ pub struct PipelineOptions {
     pub settings: Option<crate::settings::InferenceSettings>,
     /// If true, load model from a single safetensors file instead of multi-file
     pub use_single_file: bool,
+    /// Optional log level for this pipeline ("error", "warn", "info", "debug", "trace"). If None, uses global/default.
+    pub log_level: Option<String>,
+    /// If true, enables verbose logging for debugging (overrides log_level to "debug").
+    pub verbose: bool,
     // Add more options as needed
 }
 
@@ -46,6 +52,8 @@ impl std::fmt::Debug for PipelineOptions {
             .field("backend", &self.backend)
             .field("settings", &self.settings)
             .field("use_single_file", &self.use_single_file)
+            .field("log_level", &self.log_level)
+            .field("verbose", &self.verbose)
             .finish()
     }
 }
@@ -60,6 +68,8 @@ impl Clone for PipelineOptions {
             backend: self.backend,
             settings: self.settings.clone(),
             use_single_file: self.use_single_file,
+            log_level: self.log_level.clone(),
+            verbose: self.verbose,
         }
     }
 }
@@ -127,86 +137,91 @@ pub enum PipelineError {
 impl Pipeline {
     /// Create a new BitNet Pipeline with the given options.
     pub async fn new(options: PipelineOptions) -> Result<Self, PipelineError> {
-        if options.use_single_file {
-            // Use the new single-file loader
-            return Pipeline::from_safetensors(options).await;
-        }
+        // --- Logging setup ---
+        logging::init_logging(options.log_level.as_deref(), options.verbose, None);
         let model_id = options.model_id.clone().unwrap_or(DEFAULT_MODEL_ID.to_string());
-        let model_dir = options.input_dir.clone().unwrap_or_else(|| original_dir().join(&model_id));
-        let converted_dir = options.output_dir.clone().unwrap_or_else(|| converted_dir().join(&model_id));
-        Ok(Self {
-            options: options.clone(),
-            model_dir,
-            converted_dir,
-            settings: options.settings.clone(),
-            backend: options.backend,
-            model: None,
-            tokenizer: None,
-            wgpu_context: None,
-        })
-    }
-
-    /// Load model/tokenizer from a single safetensors file (stub for now)
-    pub async fn from_safetensors(options: PipelineOptions) -> Result<Self, PipelineError> {
-        println!("[BitNet] [EXPERIMENTAL] Loading model from single .safetensors file (not yet implemented)");
-        Err(PipelineError::Other("Single-file safetensors loading not yet implemented".to_string()))
-    }
-
-    /// Ensures model files are present and converted. Runs blocking code in spawn_blocking.
-    pub async fn ensure_model_ready(&mut self) -> Result<(), PipelineError> {
-        let reporter = self.options.reporter.as_ref();
-        if let Some(cb) = reporter { cb(1, "Step 1: Downloading/Verifying original model files..."); }
-        let model_id = self.options.model_id.clone().unwrap_or_else(|| DEFAULT_MODEL_ID.to_string());
-        let model_dir = self.model_dir.clone();
-        let converted_dir = self.converted_dir.clone();
-        // Download model files if needed
-        let model_id_for_blocking = model_id.clone();
-        tokio::task::spawn_blocking(move || {
-            hf_loader::get_model(Some(&model_id_for_blocking)).map_err(|e| PipelineError::ModelFile(format!("{e}")))
+        let model_id_for_loader = model_id.clone();
+        // Always use hf_loader to get the correct original model directory
+        let model_files = tokio::task::spawn_blocking(move || {
+            hf_loader::get_model(Some(&model_id_for_loader)).map_err(|e| PipelineError::ModelFile(format!("{e}")))
         }).await.map_err(|e| PipelineError::Other(format!("Join error: {e}")))??;
-        if let Some(cb) = reporter { cb(1, "Step 1: Complete."); }
-        if let Some(cb) = reporter { cb(1, "Step 2: Converting model to BitNet format..."); }
-        // Convert if needed
-        if !converted_dir.join("block_0.bin").exists() {
-            let input_dir = model_dir.to_str().unwrap().to_string();
-            let output_dir = converted_dir.to_str().unwrap().to_string();
-            tokio::task::spawn_blocking(move || {
-                convert_model_on_disk(&input_dir, &output_dir).map_err(|e| PipelineError::Conversion(format!("{e}")))
-            }).await.map_err(|e| PipelineError::Other(format!("Join error: {e}")))??;
+        let orig_model_dir = model_files.model_dir.clone();
+        let model_dir = options.input_dir.clone().unwrap_or_else(|| orig_model_dir.clone());
+        let converted_dir = options.output_dir.clone().unwrap_or_else(|| converted_dir().join(&model_id));
+        println!("[BitNet][Pipeline][DEBUG] model_dir: {}", model_dir.display());
+        match std::fs::metadata(&model_dir) {
+            Ok(meta) => println!("[BitNet][Pipeline][DEBUG] model_dir exists: {} (is_dir: {})", model_dir.display(), meta.is_dir()),
+            Err(e) => println!("[BitNet][Pipeline][DEBUG] model_dir does not exist: {} (error: {})", model_dir.display(), e),
         }
-        if let Some(cb) = reporter { cb(1, "Step 2: Complete."); }
-        if let Some(cb) = reporter { cb(1, "Step 3: Loading model/tokenizer/context..."); }
-        // Only load if not already loaded
-        if self.model.is_none() || self.tokenizer.is_none() || (self.backend == PipelineBackend::Gpu && self.wgpu_context.is_none()) {
-            // Load config
-            let config_path = self.model_dir.join(CONFIG_JSON);
-            let config_str = std::fs::read_to_string(&config_path).map_err(|e| PipelineError::ModelFile(format!("{e}")))?;
-            let hf_config: serde_json::Value = serde_json::from_str(&config_str).map_err(|e| PipelineError::ModelFile(format!("{e}")))?;
-            let model_config = crate::model::ModelConfig {
-                hidden_size: hf_config["hidden_size"].as_u64().unwrap() as usize,
-                intermediate_size: hf_config["intermediate_size"].as_u64().unwrap() as usize,
-                num_hidden_layers: hf_config["num_hidden_layers"].as_u64().unwrap() as usize,
-                num_attention_heads: hf_config["num_attention_heads"].as_u64().unwrap() as usize,
-                num_key_value_heads: hf_config["num_key_value_heads"].as_u64().unwrap() as usize,
-                vocab_size: hf_config["vocab_size"].as_u64().unwrap() as usize,
-                max_seq_len: 4096,
-                rms_norm_eps: hf_config["rms_norm_eps"].as_f64().unwrap() as f32,
-                dropout: 0.0,
-            };
-            let model = crate::model::Transformer::from_dir(&self.converted_dir, model_config)
+        // Load config
+        // --- Use bitnet_packed_config.json if present ---
+        let packed_config_path = model_dir.join("bitnet_packed_config.json");
+        let config_path = if packed_config_path.exists() {
+            println!("[BitNet][Pipeline][DEBUG] Loading config from: {}", packed_config_path.display());
+            packed_config_path
+        } else {
+            let fallback = model_dir.join("config.json");
+            println!("[BitNet][Pipeline][DEBUG] Loading config from: {}", fallback.display());
+            fallback
+        };
+        let config: crate::model::ModelConfig = serde_json::from_str(&std::fs::read_to_string(&config_path)
+            .map_err(|e| PipelineError::ModelFile(format!("Config IO error: {e}")))?)
+            .map_err(|e| PipelineError::ModelFile(format!("Config JSON error: {e}")))?;
+        if options.use_single_file {
+            // Single safetensors file path
+            let safetensors_path = converted_dir.join("model.safetensors");
+            if !safetensors_path.exists() {
+                // Run the converter to create model.safetensors
+                let input_dir = orig_model_dir.to_str().unwrap().to_string();
+                let output_dir = converted_dir.to_str().unwrap().to_string();
+                tokio::task::spawn_blocking(move || {
+                    bitnet_converter::convert_model_on_disk(&input_dir, &output_dir, true)
+                        .map_err(|e| PipelineError::Conversion(format!("{e}")))
+                }).await.map_err(|e| PipelineError::Other(format!("Join error: {e}")))??;
+            }
+            println!("[BitNet][Pipeline][DEBUG] Attempting to open model.safetensors at: {}", model_dir.join("model.safetensors").display());
+            // Now load from safetensors using the unified loader
+            let model = crate::model::Transformer::load(&converted_dir, config, ModelFormat::Safetensors)
                 .map_err(|e| PipelineError::ModelLoad(format!("{e}")))?;
-            let tokenizer_path = self.model_dir.join("tokenizer.json");
+            let tokenizer_path = model_dir.join("tokenizer.json");
             let tokenizer = crate::tokenizer::Tokenizer::from_file(tokenizer_path.to_str().unwrap())
                 .map_err(|e| PipelineError::Tokenizer(format!("{e}")))?;
-            self.model = Some(model);
-            self.tokenizer = Some(tokenizer);
-            if self.backend == PipelineBackend::Gpu {
-                let wgpu_context = crate::wgpu_context::WgpuContext::new().await.map_err(|e| PipelineError::Other(e.to_string()))?;
-                self.wgpu_context = Some(wgpu_context);
+            return Ok(Self {
+                options: options.clone(),
+                model_dir,
+                converted_dir,
+                settings: options.settings.clone(),
+                backend: options.backend,
+                model: Some(model),
+                tokenizer: Some(tokenizer),
+                wgpu_context: None,
+            });
+        } else {
+            // Streaming .bin path (default)
+            if !converted_dir.join("block_0.bin").exists() {
+                let input_dir = orig_model_dir.to_str().unwrap().to_string();
+                let output_dir = converted_dir.to_str().unwrap().to_string();
+                tokio::task::spawn_blocking(move || {
+                    bitnet_converter::convert_model_on_disk(&input_dir, &output_dir, false)
+                        .map_err(|e| PipelineError::Conversion(format!("{e}")))
+                }).await.map_err(|e| PipelineError::Other(format!("Join error: {e}")))??;
             }
+            let model = crate::model::Transformer::load(&converted_dir, config, ModelFormat::Bin)
+                .map_err(|e| PipelineError::ModelLoad(format!("{e}")))?;
+            let tokenizer_path = model_dir.join("tokenizer.json");
+            let tokenizer = crate::tokenizer::Tokenizer::from_file(tokenizer_path.to_str().unwrap())
+                .map_err(|e| PipelineError::Tokenizer(format!("{e}")))?;
+            return Ok(Self {
+                options: options.clone(),
+                model_dir,
+                converted_dir,
+                settings: options.settings.clone(),
+                backend: options.backend,
+                model: Some(model),
+                tokenizer: Some(tokenizer),
+                wgpu_context: None,
+            });
         }
-        if let Some(cb) = reporter { cb(1, "Step 3: Complete."); }
-        Ok(())
     }
 
     /// Loads the model, tokenizer, and runs a forward pass on the given prompt.
@@ -224,25 +239,25 @@ impl Pipeline {
                     }
                 });
                 use std::time::Instant;
-                println!("[BitNet] [CPU] Starting inference for prompt: '{}'.", prompt);
-                let t0 = Instant::now();
+                log::info!("[BitNet] [CPU] Starting inference for prompt: '{}'.", prompt);
+                let _t0 = Instant::now();
                 if let Some(cb) = reporter { cb(2, "Step 1: Model/tokenizer already loaded."); }
                 // Use already-loaded model/tokenizer
                 let model = self.model.as_mut().ok_or(PipelineError::ModelLoad("Model not loaded".to_string()))?;
                 let tokenizer = self.tokenizer.as_ref().ok_or(PipelineError::Tokenizer("Tokenizer not loaded".to_string()))?;
-                let t1 = Instant::now();
+                let _t1 = Instant::now();
                 if let Some(cb) = reporter { cb(2, "Step 2: Tokenizing input..."); }
                 let tokens = tokenizer.encode(prompt).map_err(|e| PipelineError::Tokenizer(format!("{e}")))?;
-                println!("[BitNet] [CPU] Tokenized input: {:?}", tokens);
+                log::debug!("[BitNet] [CPU] Tokenized input: {:?}", tokens);
                 let token_id = tokens[0] as usize;
                 let pos = 0;
                 let mut kv_caches = vec![crate::attention::KVCache::default(); model.layers.len()];
                 // Log Rayon thread count
                 let num_threads = rayon::current_num_threads();
-                println!("[BitNet] [CPU] Rayon thread pool size: {}", num_threads);
-                let t3 = Instant::now();
+                log::info!("[BitNet] [CPU] Rayon thread pool size: {}", num_threads);
+                let _t3 = Instant::now();
                 let logits = model.cpu_forward(token_id, pos, &mut kv_caches);
-                println!("[BitNet] [CPU] Inference completed in {:.2?}", t3.elapsed());
+                log::info!("[BitNet] [CPU] Inference completed.");
                 if let Some(cb) = reporter { cb(2, "Step 3: Complete."); }
                 if logits.len() != model.config.vocab_size {
                     return Err(PipelineError::Inference("Logits vector has incorrect size".to_string()));
@@ -252,7 +267,7 @@ impl Pipeline {
                 }
                 let (top_token_id, top_logit) = logits.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).unwrap();
                 let top_token = tokenizer.decode(&[top_token_id as u32]).unwrap_or("<UNK>".to_string());
-                println!("[BitNet] [CPU] Top token: '{}' (id: {}), logit: {}", top_token, top_token_id, top_logit);
+                log::info!("[BitNet] [CPU] Top token: '{}' (id: {}), logit: {}", top_token, top_token_id, top_logit);
                 Ok(PipelineResult {
                     logits: logits.clone(),
                     top_token,
@@ -268,7 +283,7 @@ impl Pipeline {
                 let tokenizer = self.tokenizer.as_ref().ok_or(PipelineError::Tokenizer("Tokenizer not loaded".to_string()))?;
                 let wgpu_context = self.wgpu_context.as_ref().ok_or(PipelineError::Other("WGPU context not loaded".to_string()))?;
                 let tokens = tokenizer.encode(prompt).map_err(|e| PipelineError::Tokenizer(format!("{e}")))?;
-                println!("[BitNet] [GPU] Tokenized input: {:?}", tokens);
+                log::debug!("[BitNet] [GPU] Tokenized input: {:?}", tokens);
                 let token_id = tokens[0] as usize;
                 let pos = 0;
                 let mut kv_caches = vec![crate::attention::KVCache::default(); model.layers.len()];
@@ -281,7 +296,7 @@ impl Pipeline {
                 }
                 let (top_token_id, top_logit) = logits.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).unwrap();
                 let top_token = tokenizer.decode(&[top_token_id as u32]).unwrap_or("<UNK>".to_string());
-                println!("[BitNet] [GPU] Top token: '{}' (id: {}), logit: {}", top_token, top_token_id, top_logit);
+                log::info!("[BitNet] [GPU] Top token: '{}' (id: {}), logit: {}", top_token, top_token_id, top_logit);
                 Ok(PipelineResult {
                     logits: logits.clone(),
                     top_token,

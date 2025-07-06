@@ -1,8 +1,23 @@
+#![deny(missing_docs)]
+//! BitNet Converter: Convert Hugging Face safetensors to BitNet's optimized, quantized format.
+//!
+//! This crate provides a robust, streaming-friendly Rust tool for converting standard model weights (e.g., Hugging Face safetensors) into the optimized, quantized format required by the BitNet engine.
+//!
+//! # Features
+//! - Burn-free, pure Rust conversion
+//! - Streaming output (per-block and single-file)
+//! - Parallelized for speed
+//! - Robust loader and error handling
+//! - Comprehensive test coverage
+//!
+//! # Usage
+//! Add `bitnet-converter` as a dependency and use the provided API or CLI for model conversion.
+
 use std::path::PathBuf;
 use serde::Deserialize;
 use bincode::serde::encode_to_vec;
 use bincode::config::standard;
-use bitnet_tools::constants::{workspace_root, CONFIG_JSON, SAFETENSORS_FILE};
+use bitnet_tools::constants::{workspace_root, CONFIG_JSON, SAFETENSORS_FILE, EMBEDDING_KEY, NORM_KEY, LM_HEAD_KEY};
 use std::time::Instant;
 use rayon::prelude::*;
 use crate::packer::BitNetModelRecord;
@@ -10,7 +25,9 @@ use safetensors::{tensor::TensorView, Dtype, serialize_to_file};
 use half::bf16;
 use std::collections::BTreeMap;
 
+/// Model quantization, packing, and serialization utilities.
 pub mod packer;
+/// Robust safetensors loader and tensor source utilities.
 pub mod source;
 
 #[derive(Deserialize)]
@@ -18,44 +35,16 @@ struct PartialConfig {
     num_hidden_layers: usize,
 }
 
-/// Write the full model as a single safetensors file (model.safetensors)
+/// Write the full model as a single safetensors file (model.safetensors), including all quantized weights and scales
 pub fn write_single_file_model_safetensors(model: &BitNetModelRecord, output_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let single_file_path = output_path.join("model.safetensors");
     // Ensure parent directory exists
     if let Some(parent) = single_file_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut tensors = BTreeMap::new();
-    // Helper to convert Vec<f32> to Vec<u8> as bf16
-    fn f32_to_bf16_bytes(data: &[f32]) -> Vec<u8> {
-        let bf16_vec: Vec<bf16> = data.iter().map(|&f| bf16::from_f32(f)).collect();
-        let u16_vec: Vec<u16> = bf16_vec.iter().map(|b| b.to_bits()).collect();
-        bytemuck::cast_slice(&u16_vec).to_vec()
-    }
-    // Embedding
-    let embedding_bytes = f32_to_bf16_bytes(&model.embedding.weight);
-    tensors.insert("embedding.weight".to_string(), TensorView::new(Dtype::BF16, model.embedding.shape.clone(), &embedding_bytes)?);
-    // Norm
-    let norm_bytes = f32_to_bf16_bytes(&model.norm.weight);
-    tensors.insert("norm.weight".to_string(), TensorView::new(Dtype::BF16, model.norm.shape.clone(), &norm_bytes)?);
-    // LM Head
-    let lm_head_bytes = f32_to_bf16_bytes(&model.lm_head.weight);
-    tensors.insert("lm_head.weight".to_string(), TensorView::new(Dtype::BF16, model.lm_head.shape.clone(), &lm_head_bytes)?);
-    // Blocks
-    let mut block_bytes: Vec<(String, Vec<u8>, Vec<usize>)> = Vec::new();
-    for (i, block) in model.blocks.iter().enumerate() {
-        let prefix = format!("block_{}.", i);
-        let attn_norm_bytes = f32_to_bf16_bytes(&block.attention_norm.weight);
-        let ffn_norm_bytes = f32_to_bf16_bytes(&block.ffn_norm.weight);
-        block_bytes.push((format!("{}attention_norm.weight", prefix), attn_norm_bytes, block.attention_norm.shape.clone()));
-        block_bytes.push((format!("{}ffn_norm.weight", prefix), ffn_norm_bytes, block.ffn_norm.shape.clone()));
-        // Add more tensors as needed
-    }
-    for (name, bytes, shape) in &block_bytes {
-        tensors.insert(name.clone(), TensorView::new(Dtype::BF16, shape.clone(), bytes)?);
-    }
-    serialize_to_file(&tensors, &None, &single_file_path)?;
-    println!("[CONVERT] Wrote single-file model to: {}", single_file_path.display());
+    // Use the robust quantized safetensors export (writes all weights/scales)
+    crate::packer::export_quantized_to_safetensors(model, &single_file_path)?;
+    println!("[CONVERT] Wrote quantized single-file model to: {}", single_file_path.display());
     Ok(())
 }
 
@@ -119,6 +108,17 @@ pub fn convert_model_on_disk(input_dir: &str, output_dir: &str, write_streamable
         });
         println!("[CONVERT] Wrote all model parts in {:.2?}", t3.elapsed());
     }
+    // --- Write a future-proof config for the packed model ---
+    let orig_config_path = input_path.join(CONFIG_JSON);
+    let packed_config_path = output_path.join("bitnet_packed_config.json");
+    let mut packed_config: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&orig_config_path)?)?;
+    packed_config["bitnet_packed"] = serde_json::Value::Bool(true);
+    packed_config["_note"] = serde_json::Value::String("All packed tensor shapes are as per BitNet's quantization. QKV: [3*hidden_size, hidden_size/16], etc. Use this config for inference with the packed model.".to_string());
+    // --- Robust fix: always set hidden_size and vocab_size to match packed model ---
+    packed_config["hidden_size"] = serde_json::Value::from(record.embedding.shape[1]);
+    packed_config["vocab_size"] = serde_json::Value::from(record.embedding.shape[0]);
+    std::fs::write(&packed_config_path, serde_json::to_string_pretty(&packed_config)?)?;
+    println!("[CONVERT] Wrote packed model config to: {}", packed_config_path.display());
     println!("[CONVERT] Total conversion time: {:.2?}", start.elapsed());
     Ok(output_path)
 } 

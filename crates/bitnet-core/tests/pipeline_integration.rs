@@ -49,6 +49,7 @@ fn test_conversion_outputs_blocks() {
     let _ = convert_model_on_disk(
         input_dir.to_str().unwrap(),
         output_dir.to_str().unwrap(),
+        false
     ).expect("Conversion failed");
     // Check for top-level files
     let expect_files = ["embedding.bin", "norm.bin", "lm_head.bin"];
@@ -210,6 +211,7 @@ fn test_per_block_serialization() {
     let _ = bitnet_converter::convert_model_on_disk(
         input_dir.to_str().unwrap(),
         output_dir.to_str().unwrap(),
+        false
     ).expect("Conversion failed");
     let expect_files = ["embedding.bin", "norm.bin", "lm_head.bin", "block_0.bin"];
     for f in &expect_files {

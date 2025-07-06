@@ -1,6 +1,10 @@
 // File: E:\Desktop\Bitnet rs\crates\bitnet-converter\src\source.rs
 // --- FULL REPLACEMENT ---
 
+//! Robust safetensors loader and tensor source utilities for BitNet Converter.
+//!
+//! Provides types and functions for loading, mapping, and representing tensors from safetensors files.
+
 use memmap2::Mmap;
 use safetensors::{Dtype, SafeTensors};
 use std::collections::HashMap;
@@ -9,23 +13,53 @@ use std::path::Path;
 use bytemuck;
 use rayon::prelude::*;
 
+/// Enum for robust tensor data representation.
+#[derive(Debug, Clone)]
+pub enum TensorData {
+    /// 32-bit floating point tensor data.
+    F32(Vec<f32>),
+    /// 32-bit unsigned integer tensor data.
+    U32(Vec<u32>),
+    /// 32-bit signed integer tensor data.
+    I32(Vec<i32>),
+    /// BF16 (stored as f32) tensor data.
+    BF16(Vec<f32>),
+    /// 8-bit signed integer tensor data.
+    I8(Vec<i8>),
+    /// 8-bit unsigned integer tensor data.
+    U8(Vec<u8>),
+    // Add more as needed
+}
 
-/// Map from tensor name to (data, shape)
-pub type TensorMap = HashMap<String, (Vec<f32>, Vec<usize>)>;
+impl TensorData {
+    /// Returns a reference to the underlying u32 vector, if present.
+    pub fn as_u32_vec(&self) -> Option<&Vec<u32>> {
+        match self {
+            TensorData::U32(v) => Some(v),
+            _ => None,
+        }
+    }
+}
 
+/// Map from tensor name to (data, shape).
+pub type RichTensorMap = HashMap<String, (TensorData, Vec<usize>)>;
+
+/// Model source for loading tensors.
 pub enum ModelSource {
+    /// Load tensors from a safetensors file.
     SafetensorsFile(String),
 }
 
 impl ModelSource {
-    pub fn load_tensors(&self) -> Result<TensorMap, Box<dyn std::error::Error>> {
+    /// Load tensors from the model source into a RichTensorMap.
+    pub fn load_tensors(&self) -> Result<RichTensorMap, Box<dyn std::error::Error>> {
         match self {
             ModelSource::SafetensorsFile(path) => load_safetensors_mmap(path.as_ref()),
         }
     }
 }
 
-fn load_safetensors_mmap(path: &Path) -> Result<TensorMap, Box<dyn std::error::Error>> {
+fn load_safetensors_mmap(path: &Path) -> Result<RichTensorMap, Box<dyn std::error::Error>> {
     let t0 = std::time::Instant::now();
     let file = File::open(path)?;
     println!("[PROFILE] File open: {:?}", t0.elapsed());
@@ -39,10 +73,7 @@ fn load_safetensors_mmap(path: &Path) -> Result<TensorMap, Box<dyn std::error::E
     let tensor_vec: Vec<_> = safetensors.names().par_iter().map(|name| {
         let t_tensor = std::time::Instant::now();
         let tensor_view = safetensors.tensor(name).ok()?;
-        // Only process bf16 tensors (BitNet format)
-        if tensor_view.dtype() != Dtype::BF16 {
-            return None;
-        }
+        let dtype = tensor_view.dtype();
         let original_shape = tensor_view.shape();
         let shape: Vec<usize> = if original_shape.len() == 1 {
             vec![1, original_shape[0]]
@@ -52,14 +83,41 @@ fn load_safetensors_mmap(path: &Path) -> Result<TensorMap, Box<dyn std::error::E
             log::warn!("Skipping tensor '{}' with unsupported shape {:?}", name, original_shape);
             return None;
         };
-        let bf16_bytes = tensor_view.data();
-        let u16_slice = bytemuck::cast_slice::<u8, u16>(bf16_bytes);
-        let f32_vec: Vec<f32> = u16_slice.iter().map(|&bits| half::bf16::from_bits(bits).to_f32()).collect();
+        let data = tensor_view.data();
+        let tensor_data = match dtype {
+            Dtype::BF16 => {
+                let u16_slice = bytemuck::cast_slice::<u8, u16>(data);
+                let f32_vec: Vec<f32> = u16_slice.iter().map(|&bits| half::bf16::from_bits(bits).to_f32()).collect();
+                TensorData::BF16(f32_vec)
+            },
+            Dtype::F32 => {
+                let f32_slice = bytemuck::cast_slice::<u8, f32>(data);
+                TensorData::F32(f32_slice.to_vec())
+            },
+            Dtype::U32 => {
+                let u32_slice = bytemuck::cast_slice::<u8, u32>(data);
+                TensorData::U32(u32_slice.to_vec())
+            },
+            Dtype::I32 => {
+                let i32_slice = bytemuck::cast_slice::<u8, i32>(data);
+                TensorData::I32(i32_slice.to_vec())
+            },
+            Dtype::I8 => {
+                TensorData::I8(data.to_vec().into_iter().map(|b| b as i8).collect())
+            },
+            Dtype::U8 => {
+                TensorData::U8(data.to_vec())
+            },
+            _ => {
+                log::warn!("Skipping tensor '{}' with unsupported dtype {:?}", name, dtype);
+                return None;
+            }
+        };
         let elapsed = t_tensor.elapsed();
-        println!("[PROFILE] Tensor {} conversion: {:?}", name, elapsed);
-        Some((name.to_string(), (f32_vec, shape)))
+        println!("[PROFILE] Tensor {} conversion: {:?} (dtype: {:?})", name, elapsed, dtype);
+        Some((name.to_string(), (tensor_data, shape)))
     }).filter_map(|x| x).collect();
-    let map: TensorMap = tensor_vec.into_iter().collect();
+    let map: RichTensorMap = tensor_vec.into_iter().collect();
     println!("[PROFILE] Total tensor conversion: {:?}", t0.elapsed());
     println!("[PROFILE] Total load_safetensors_mmap: {:?}", t0.elapsed());
     Ok(map)
@@ -103,13 +161,13 @@ mod tests {
         assert!(tensor_map.contains_key("weight_2d"), "2D tensor should be loaded");
         let (tensor_2d, shape_2d) = &tensor_map["weight_2d"];
         assert_eq!(shape_2d, &vec![2, 2]);
-        assert_eq!(tensor_2d, &data_f32_2d);
+        assert_eq!(tensor_2d.as_f32_vec().unwrap(), &data_f32_2d);
         
         // Assert 1D tensor was loaded and promoted correctly
         assert!(tensor_map.contains_key("weight_1d"), "1D tensor should be loaded");
         let (tensor_1d, shape_1d) = &tensor_map["weight_1d"];
         assert_eq!(shape_1d, &vec![1, 2], "1D tensor should be promoted to 2D");
-        assert_eq!(tensor_1d, &data_f32_1d);
+        assert_eq!(tensor_1d.as_f32_vec().unwrap(), &data_f32_1d);
 
         println!("\n✅ Test Passed: Burn-free loader correctly handles 1D and 2D tensors.");
     }

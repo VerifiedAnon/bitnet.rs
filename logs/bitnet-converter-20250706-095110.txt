@@ -1,0 +1,5 @@
+13:51:10 [INFO] BitNet Converter started. Log file: logs/bitnet-converter-20250706-095110.txt
+13:51:13 [WARN] No lm_head.weight or output.weight found; using tied embeddings
+13:53:22 [INFO] 
+✅ Conversion successful!
+13:53:22 [INFO] Converted model saved in: E:\Desktop\Bitnet rs\models/Converted/microsoft/bitnet-b1.58-2B-4T-bf16

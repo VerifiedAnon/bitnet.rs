@@ -211,16 +211,16 @@ mod tests {
         match context_result {
             Ok(context) => {
                 // Success case: A device and queue were created.
-                println!("Successfully created WGPU context.");
+                log::info!("Successfully created WGPU context.");
                 // Simple smoke test to ensure the device is responsive.
                 let _limits = context.device.limits();
-                println!("Device limits: {:?}", _limits);
+                log::debug!("Device limits: {:?}", _limits);
                 assert!(true);
             }
             Err(BitNetError::NoSuitableAdapter) => {
                 // This is an expected and valid outcome in environments without a GPU (e.g., some CI runners).
                 // We treat this as a pass, not a failure.
-                println!("Test passed: No suitable GPU adapter found, which is an expected outcome in some environments.");
+                log::info!("Test passed: No suitable GPU adapter found, which is an expected outcome in some environments.");
                 assert!(true);
             }
             Err(e) => {

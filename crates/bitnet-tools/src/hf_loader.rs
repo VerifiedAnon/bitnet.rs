@@ -1,3 +1,7 @@
+//! Hugging Face model download and management utilities for BitNet projects.
+//!
+//! Provides functions to download models, locate model files, and manage model directories.
+
 use std::path::{Path, PathBuf};
 use hf_hub::{api::sync::Api, Repo, RepoType};
 use crate::constants::{models_root, CONFIG_JSON, SAFETENSORS_EXT, REQUIRED_MODEL_FILES, TOKENIZER_MODEL, SAFETENSORS_FILE};
@@ -10,31 +14,33 @@ use reqwest::header::CONTENT_LENGTH;
 
 pub use crate::constants::DEFAULT_MODEL_ID;
 
-/// Returns the default model download directory (relative to project root).
+/// Returns the default model directory path.
 pub fn default_model_dir() -> PathBuf {
     models_root().join(crate::constants::DEFAULT_MODEL_ID)
 }
 
-/// Returns the directory for original (downloaded) model files.
+/// Returns the path to the original model directory for a given base directory and model ID.
 pub fn original_model_dir(base_dir: &Path, model_id: &str) -> PathBuf {
     base_dir.join("Original").join(model_id)
 }
 
-/// Returns the directory for converted model files.
+/// Returns the path to the converted model directory for a given base directory and model ID.
 pub fn converted_model_dir(base_dir: &Path, model_id: &str) -> PathBuf {
     base_dir.join("Converted").join(model_id)
 }
 
-/// Struct holding paths to key model files.
-#[derive(Debug, Clone)]
+/// Struct containing paths to model files.
 pub struct ModelFiles {
+    /// The directory containing the model files.
     pub model_dir: PathBuf,
+    /// The path to the model configuration file.
     pub config: PathBuf,
+    /// The list of safetensors files found in the model directory.
     pub safetensors_files: Vec<PathBuf>,
     // Add more fields as needed
 }
 
-/// Download model weights and tokenizer files from Hugging Face, with progress reporting.
+/// Downloads the model and tokenizer from Hugging Face with progress reporting.
 pub fn download_model_and_tokenizer_with_progress(
     model_id: &str,
     revision: Option<&str>,
@@ -129,7 +135,7 @@ pub fn download_model_and_tokenizer_with_progress(
     Ok(())
 }
 
-/// Find all .safetensors files in a directory.
+/// Finds all safetensors files in the given directory.
 pub fn find_safetensors_files(dir: &Path) -> Vec<PathBuf> {
     std::fs::read_dir(dir)
         .ok()
@@ -141,14 +147,7 @@ pub fn find_safetensors_files(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Attempts to get (and if needed, download) a model, using a custom base directory.
-/// If `model_id` is None, uses the default model.
-/// Returns paths to the needed files (config.json, all .safetensors files).
-///
-/// - Creates <base_dir>/Original/<model_id>/ if not present
-/// - Downloads files if not present
-/// - Validates by file presence (not checksum)
-/// - Returns ModelFiles struct with key paths
+/// Gets model files using the provided base directory and optional model ID.
 pub fn get_model_with_base(base_dir: &Path, model_id: Option<&str>) -> Result<ModelFiles, Box<dyn std::error::Error>> {
     let id = model_id.unwrap_or(DEFAULT_MODEL_ID);
     let dir = original_model_dir(base_dir, id);
@@ -209,7 +208,7 @@ pub fn get_model_with_base(base_dir: &Path, model_id: Option<&str>) -> Result<Mo
     })
 }
 
-/// Production wrapper: uses MODELS_ROOT as base dir.
+/// Gets model files using the default base directory and optional model ID.
 pub fn get_model(model_id: Option<&str>) -> Result<ModelFiles, Box<dyn std::error::Error>> {
     get_model_with_base(models_root().as_path(), model_id)
 }

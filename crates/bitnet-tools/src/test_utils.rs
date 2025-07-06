@@ -1,3 +1,7 @@
+//! Test reporting and logging utilities for BitNet test harnesses.
+//!
+//! Provides the TestReporter struct for structured test logging, timing, and reporting.
+
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -7,7 +11,7 @@ use std::time::Instant;
 use chrono::{self, DateTime, Local};
 use crate::constants::workspace_root;
 
-/// Add a struct to track test results
+/// Represents the result of a test.
 #[derive(Clone)]
 struct TestResult {
     name: String,
@@ -16,32 +20,37 @@ struct TestResult {
     error: Option<String>,
 }
 
+/// Status of a test (pass or fail).
 #[derive(Clone, PartialEq)]
 enum TestStatus {
     Pass,
     Fail,
 }
 
+/// Special finding or annotation for a test.
 #[derive(Clone)]
 pub struct SpecialFinding {
+    /// Name of the test.
     pub test_name: String,
+    /// Label for the finding.
     pub label: String,
+    /// Description of the finding.
     pub description: String,
 }
 
-/// A struct to manage test reporting functionality
+/// Structured test reporter for logging, timing, and reporting test results.
 pub struct TestReporter {
     info_logs: Mutex<Vec<(usize, Instant, DateTime<Local>, String)>>,
     timings: Mutex<HashMap<String, std::time::Duration>>,
     log_dir: PathBuf,
     test_name: String,
-    // Store all test results
+    /// Store all test results
     results: Mutex<Vec<TestResult>>,
     special_finding: Mutex<Option<SpecialFinding>>,
 }
 
 impl TestReporter {
-    /// Creates a new TestReporter that stores logs in memory
+    /// Create a new TestReporter with the given log name.
     pub fn new(log_name: &str) -> io::Result<Self> {
         let log_dir = workspace_root().join("logs");
         fs::create_dir_all(&log_dir)?;
@@ -56,8 +65,7 @@ impl TestReporter {
         })
     }
 
-    /// Logs a general message with a test ID and timestamp to the in-memory log
-    /// Also automatically detects and records test failures from log messages
+    /// Log a message with a test ID.
     pub fn log_message(&self, test_id: usize, message: &str) {
         let now = Local::now();
         let timestamp_str = now.format("%Y-%m-%d, %H:%M:%S%.3f");
@@ -74,7 +82,7 @@ impl TestReporter {
             .push((test_id, Instant::now(), now, message.to_string()));
     }
 
-    /// Enhanced log_message that accepts message without test_id (for backward compatibility)
+    /// Log a simple message (no test ID).
     pub fn log_message_simple(&self, message: &str) {
         self.log_message(0, message);
     }
@@ -101,7 +109,7 @@ impl TestReporter {
         }
     }
 
-    /// Records a test timing in memory (for passed tests)
+    /// Record a timing for a test.
     pub fn record_timing(&self, test_name: &str, duration: std::time::Duration) {
         self.timings
             .lock()
@@ -120,7 +128,7 @@ impl TestReporter {
         });
     }
 
-    /// Records a failed test result explicitly
+    /// Record a test failure with optional duration.
     pub fn record_failure(&self, test_name: &str, error: &str, duration: Option<std::time::Duration>) {
         let mut results = self.results.lock().unwrap();
         // Remove any existing entry for this test (in case of retries)
@@ -133,7 +141,7 @@ impl TestReporter {
         });
     }
 
-    /// Records a test status explicitly (can be used for both pass and fail)
+    /// Record a test result (pass/fail) with optional duration and error.
     pub fn record_test_result(&self, test_name: &str, passed: bool, duration: Option<std::time::Duration>, error: Option<&str>) {
         if passed {
             if let Some(d) = duration {
@@ -153,7 +161,7 @@ impl TestReporter {
         }
     }
 
-    /// Record a special finding (e.g., workaround/fix) to be highlighted in the report
+    /// Record a special finding for a test.
     pub fn record_special_finding(&self, test_name: &str, label: &str, description: &str) {
         let mut sf = self.special_finding.lock().unwrap();
         *sf = Some(SpecialFinding {
@@ -163,7 +171,7 @@ impl TestReporter {
         });
     }
 
-    /// Generates a markdown report from in-memory logs
+    /// Generate a test report and write it to disk.
     pub fn generate_report(&self) {
         let timings = self.timings.lock().unwrap();
         let mut info_logs = self.info_logs.lock().unwrap();

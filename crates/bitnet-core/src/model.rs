@@ -73,6 +73,19 @@ use bincode::config::standard;
 use bincode::serde::decode_from_slice;
 use std::fs;
 use std::path::Path;
+use bitnet_tools::constants::{EMBEDDING_KEY, NORM_KEY, LM_HEAD_KEY, BLOCK_ATTENTION_NORM_KEY, BLOCK_FFN_NORM_KEY};
+use serde::{Deserialize, Serialize};
+
+/// Specifies the format of the model files to load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelFormat {
+    /// Load the model from streaming .bin files (block_*.bin).
+    Bin,
+    /// Load the model from a single safetensors file (model.safetensors).
+    Safetensors,
+}
+
+fn default_max_seq_len() -> usize { 4096 }
 
 /// Configuration for a BitNet model.
 ///
@@ -93,7 +106,7 @@ use std::path::Path;
 ///     dropout: 0.0,
 /// };
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ModelConfig {
     /// Size of the hidden layers
     pub hidden_size: usize,
@@ -110,8 +123,10 @@ pub struct ModelConfig {
     /// Epsilon for RMSNorm
     pub rms_norm_eps: f32,
     /// Dropout probability
+    #[serde(default)]
     pub dropout: f32,
     /// Maximum sequence length
+    #[serde(default = "default_max_seq_len")]
     pub max_seq_len: usize,
 }
 
@@ -292,6 +307,158 @@ impl ModelConfig {
 }
 
 impl Transformer {
+    /// Unified model loader: loads from .bin or model.safetensors depending on format
+    pub fn load(dir: &Path, config: ModelConfig, format: ModelFormat) -> Result<Self, BitNetError> {
+        match format {
+            ModelFormat::Bin => Self::from_dir(dir, config),
+            ModelFormat::Safetensors => {
+                use bitnet_converter::source::{ModelSource, TensorData};
+                use crate::attention::{Attention, AttentionConfig};
+                use crate::feed_forward::FeedForward;
+                use crate::rms_norm::BitnetRmsNorm;
+                use crate::bitnet_linear::BitLinear;
+                use crate::model::Layer;
+                
+                let safetensors_path = dir.join("model.safetensors");
+                if !safetensors_path.exists() {
+                    return Err(BitNetError::Config(format!(
+                        "Single safetensors file not found at {}",
+                        safetensors_path.display()
+                    )));
+                }
+
+                let source = ModelSource::SafetensorsFile(safetensors_path.to_string_lossy().to_string());
+                let tensor_map = source
+                    .load_tensors()
+                    .map_err(|e| BitNetError::Config(format!("Failed to load safetensors: {e}")))?;
+
+                // --- Embedding ---
+                let (embedding_data, embedding_shape) = tensor_map.get("tok_embeddings.weight")
+                    .ok_or_else(|| BitNetError::Config("Missing 'tok_embeddings.weight'".to_string()))?;
+                let embedding = embedding_data.as_f32_vec()
+                    .ok_or_else(|| BitNetError::Config("Embedding not f32".to_string()))?.clone();
+                let vocab_size = embedding_shape[0];
+                let hidden_size = embedding_shape[1];
+
+                // Validate config hidden_size against tensor-inferred hidden_size
+                if hidden_size != config.hidden_size {
+                    return Err(BitNetError::Config(format!(
+                        "Config hidden_size ({}) does not match embedding tensor hidden_size ({}).",
+                        config.hidden_size, hidden_size
+                    )));
+                }
+                if vocab_size != config.vocab_size {
+                    return Err(BitNetError::Config(format!(
+                        "Config vocab_size ({}) does not match embedding tensor vocab_size ({}).",
+                        config.vocab_size, vocab_size
+                    )));
+                }
+
+                // --- Final Norm ---
+                let (norm_data, _) = tensor_map.get("norm.weight")
+                    .ok_or_else(|| BitNetError::Config("Missing 'norm.weight'".to_string()))?;
+                let norm = BitnetRmsNorm::new(
+                    norm_data.as_f32_vec().ok_or_else(|| BitNetError::Config("Norm not f32".to_string()))?.clone(),
+                    config.rms_norm_eps,
+                );
+
+                // --- LM Head ---
+                let (output_weights_data, output_shape) = tensor_map.get("output.weight")
+                    .ok_or_else(|| BitNetError::Config("Missing 'output.weight'".to_string()))?;
+                let output_weights_f32 = output_weights_data.as_f32_vec()
+                    .ok_or_else(|| BitNetError::Config("LM head weights not f32".to_string()))?.clone();
+                let output = BitLinear {
+                    packed_weights: output_weights_f32.iter().map(|&f| f.to_bits()).collect(),
+                    weight_scales: vec![1.0; vocab_size], // LM head is not scaled
+                    in_features: hidden_size,
+                    out_features: vocab_size,
+                };
+
+                // --- Transformer Layers ---
+                let attn_config = AttentionConfig::new(
+                    config.hidden_size,
+                    config.num_attention_heads,
+                    config.num_key_value_heads,
+                    config.max_seq_len,
+                );
+
+                let mut layers = Vec::with_capacity(config.num_hidden_layers);
+                for i in 0..config.num_hidden_layers {
+                    // Helper to load a required tensor
+                    let mut load_tensor = |name: &str| -> Result<(TensorData, Vec<usize>), BitNetError> {
+                        tensor_map.get(name)
+                            .cloned()
+                            .ok_or_else(|| BitNetError::Config(format!("Missing tensor '{}'", name)))
+                    };
+
+                    // Attention Norm
+                    let (attn_norm_data, _) = load_tensor(&format!("layers.{}.attention_norm.weight", i))?;
+                    let attention_norm = BitnetRmsNorm::new(attn_norm_data.as_f32_vec().unwrap().clone(), config.rms_norm_eps);
+
+                    // FFN Norm
+                    let (ffn_norm_data, _) = load_tensor(&format!("layers.{}.ffn_norm.weight", i))?;
+                    let ffn_norm = BitnetRmsNorm::new(ffn_norm_data.as_f32_vec().unwrap().clone(), config.rms_norm_eps);
+
+                    // Attention Projections
+                    let (wqkv_weights, wqkv_shape) = load_tensor(&format!("layers.{}.attention.wqkv.weight", i))?;
+                    let (wqkv_scales, _) = load_tensor(&format!("layers.{}.attention.wqkv.weight_scale", i))?;
+                    let (wo_weights, wo_shape) = load_tensor(&format!("layers.{}.attention.wo.weight", i))?;
+                    let (wo_scales, _) = load_tensor(&format!("layers.{}.attention.wo.weight_scale", i))?;
+
+                    let wqkv_record = bitnet_converter::packer::BitLinearRecord {
+                        packed_weights: wqkv_weights.as_u32_vec().unwrap().clone(),
+                        weight_scales: wqkv_scales.as_f32_vec().unwrap().clone(),
+                        in_features: wqkv_shape[1] * 16,
+                        out_features: wqkv_shape[0],
+                    };
+                    let (q_proj, k_proj, v_proj) = split_wqkv_record(&wqkv_record, &attn_config);
+
+                    let o_proj = bitnet_converter::packer::BitLinearRecord {
+                        packed_weights: wo_weights.as_u32_vec().unwrap().clone(),
+                        weight_scales: wo_scales.as_f32_vec().unwrap().clone(),
+                        in_features: wo_shape[1] * 16,
+                        out_features: wo_shape[0],
+                    };
+
+                    // FFN Projections
+                    let (w13_weights, w13_shape) = load_tensor(&format!("layers.{}.feed_forward.w13.weight", i))?;
+                    let (w13_scales, _) = load_tensor(&format!("layers.{}.feed_forward.w13.weight_scale", i))?;
+                    let (w2_weights, w2_shape) = load_tensor(&format!("layers.{}.feed_forward.w2.weight", i))?;
+                    let (w2_scales, _) = load_tensor(&format!("layers.{}.feed_forward.w2.weight_scale", i))?;
+
+                    let w13_record = bitnet_converter::packer::BitLinearRecord {
+                        packed_weights: w13_weights.as_u32_vec().unwrap().clone(),
+                        weight_scales: w13_scales.as_f32_vec().unwrap().clone(),
+                        in_features: w13_shape[1] * 16,
+                        out_features: w13_shape[0],
+                    };
+                    let w2_record = bitnet_converter::packer::BitLinearRecord {
+                        packed_weights: w2_weights.as_u32_vec().unwrap().clone(),
+                        weight_scales: w2_scales.as_f32_vec().unwrap().clone(),
+                        in_features: w2_shape[1] * 16,
+                        out_features: w2_shape[0],
+                    };
+
+                    layers.push(Layer {
+                        attn: Attention::from_records(q_proj, k_proj, v_proj, o_proj, &attn_config),
+                        ffn: FeedForward::from_records(w13_record, w2_record),
+                        attention_norm,
+                        ffn_norm,
+                    });
+                }
+
+                Ok(Transformer {
+                    embedding,
+                    embedding_shape: embedding_shape.clone(),
+                    layers,
+                    norm,
+                    output,
+                    config,
+                })
+            }
+        }
+    }
+
     /// Loads a pretrained and converted model from a directory.
     ///
     /// The directory should contain:
@@ -325,21 +492,21 @@ impl Transformer {
     /// - The directory doesn't exist
     /// - Required files are missing
     /// - Files are corrupted or in wrong format
-    pub fn from_dir(dir: &Path, config: ModelConfig) -> Result<Self, BitNetError> {
+    pub(crate) fn from_dir(dir: &Path, config: ModelConfig) -> Result<Self, BitNetError> {
         use std::time::Instant;
-        println!("[BitNet] Loading model from {}", dir.display());
+        log::info!("[BitNet] Loading model from {}", dir.display());
         let t0 = Instant::now();
         let embedding_path = dir.join("embedding.bin");
         let embedding_bytes = fs::read(&embedding_path)?;
         let (embedding_record, _): (EmbeddingRecord, _) = decode_from_slice(&embedding_bytes, standard())?;
-        println!("[BitNet] Loaded embedding.bin in {:.2?}", t0.elapsed());
+        log::info!("[BitNet] Loaded embedding.bin in {:.2?}", t0.elapsed());
 
         let t1 = Instant::now();
         let norm_path = dir.join("norm.bin");
         let norm_bytes = fs::read(&norm_path)?;
         let (norm_record, _): (RmsNormRecord, _) = decode_from_slice(&norm_bytes, standard())?;
         let norm = BitnetRmsNorm::from_record(norm_record);
-        println!("[BitNet] Loaded norm.bin in {:.2?}", t1.elapsed());
+        log::info!("[BitNet] Loaded norm.bin in {:.2?}", t1.elapsed());
 
         let t2 = Instant::now();
         // Output projection (lm_head)
@@ -352,7 +519,7 @@ impl Transformer {
             in_features: lm_head_record.shape[1],
             out_features: lm_head_record.shape[0],
         };
-        println!("[BitNet] Loaded lm_head.bin in {:.2?}", t2.elapsed());
+        log::info!("[BitNet] Loaded lm_head.bin in {:.2?}", t2.elapsed());
 
         let attn_config = AttentionConfig::new(
             config.hidden_size,
@@ -367,7 +534,7 @@ impl Transformer {
             let block_path = dir.join(format!("block_{}.bin", i));
             let block_bytes = fs::read(&block_path)?;
             let (block_record, _): (TransformerBlockRecord, _) = decode_from_slice(&block_bytes, standard())?;
-            println!("[BitNet] Loaded block_{}.bin in {:.2?}", i, t_block.elapsed());
+            log::info!("[BitNet] Loaded block_{}.bin in {:.2?}", i, t_block.elapsed());
 
             // Split wqkv into Q, K, V BitLinearRecords using the unified function
             let (q_proj, k_proj, v_proj) = split_wqkv_record(&block_record.attention.wqkv, &attn_config);
@@ -470,6 +637,25 @@ impl Transformer {
         // 4. Final output projection (LM Head)
         let logits = self.output.forward_cpu(&x_norm, 1);
         logits
+    }
+}
+
+#[cfg(feature = "diagnostics")]
+pub fn print_safetensors_shapes(path: &str) {
+    use crate::bitnet_linear::TensorData;
+    use std::collections::HashMap;
+    use crate::bitnet_linear::ModelSource;
+    let source = ModelSource::SafetensorsFile(path.to_string());
+    let tensor_map = match source.load_tensors() {
+        Ok(map) => map,
+        Err(e) => {
+            println!("[BitNet][Diagnostics][ERROR] Failed to load safetensors: {}", e);
+            return;
+        }
+    };
+    println!("[BitNet][Diagnostics] Tensors in {}:", path);
+    for (name, (_data, shape)) in tensor_map.iter() {
+        println!("  - {}: {:?}", name, shape);
     }
 }
 
@@ -688,12 +874,8 @@ mod tests {
             in_features,
             out_features: total_rows,
         };
-        let o_proj = BitLinearRecord {
-            packed_weights: vec![101,102],
-            weight_scales: vec![0.7,0.8],
-            in_features: 2,
-            out_features: 2,
-        };
+        let o_proj_weights_f32 = vec![101.0f32, 102.0f32];
+        let o_proj_weights: Vec<u32> = o_proj_weights_f32.iter().map(|&f| f.to_bits()).collect();
         let w13 = BitLinearRecord {
             packed_weights: vec![103,104],
             weight_scales: vec![0.9,1.0],
@@ -707,7 +889,7 @@ mod tests {
             out_features: 2,
         };
         let block_record = bitnet_converter::packer::TransformerBlockRecord {
-            attention: bitnet_converter::packer::AttentionRecord { wqkv: wqkv.clone(), o_proj: o_proj.clone() },
+            attention: bitnet_converter::packer::AttentionRecord { wqkv: wqkv.clone(), o_proj: bitnet_converter::packer::BitLinearRecord { packed_weights: o_proj_weights.clone(), weight_scales: vec![0.7,0.8], in_features: 2, out_features: 2 } },
             feed_forward: bitnet_converter::packer::FeedForwardRecord { w13: w13.clone(), w2: w2.clone() },
             attention_norm: bitnet_converter::packer::RmsNormRecord { weight: vec![1.0, 1.0], shape: vec![2] },
             ffn_norm: bitnet_converter::packer::RmsNormRecord { weight: vec![1.0, 1.0], shape: vec![2] },
@@ -725,8 +907,8 @@ mod tests {
         let attn_cfg = AttentionConfig::new(num_heads * head_dim, num_heads, num_kv_heads, 8);
         let (q, k, v) = split_wqkv_record(&wqkv, &attn_cfg);
         if loaded.layers[0].attn.q_proj.packed_weights != q.packed_weights {
-            println!("Loaded Q packed_weights: {:?}", loaded.layers[0].attn.q_proj.packed_weights);
-            println!("Expected Q packed_weights: {:?}", q.packed_weights);
+            log::debug!("Loaded Q packed_weights: {:?}", loaded.layers[0].attn.q_proj.packed_weights);
+            log::debug!("Expected Q packed_weights: {:?}", q.packed_weights);
         }
         assert_eq!(loaded.layers[0].attn.q_proj.packed_weights, q.packed_weights);
         assert_eq!(loaded.layers[0].attn.k_proj.packed_weights, k.packed_weights);

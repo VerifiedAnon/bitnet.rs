@@ -59,7 +59,7 @@
 //! 4. At runtime, activations are dynamically quantized
 //!
 
-use crate::kernels::{BitnetMetadata, pack_ternary_weights};
+use crate::kernels;
 use crate::wgpu_context::WgpuContext;
 use bitnet_converter::packer::BitLinearRecord;
 use wgpu::util::DeviceExt;
@@ -96,7 +96,7 @@ impl BitLinear {
     /// This function is primarily for testing and demonstration.
     pub fn new(weights: Vec<Vec<i8>>, in_features: usize, out_features: usize) -> Self {
         // Pack weights and calculate scales
-        let (packed_weights, weight_scales) = pack_ternary_weights(&weights).unwrap();
+        let (packed_weights, weight_scales) = kernels::pack_ternary_weights(&weights).unwrap();
         
         Self {
             packed_weights,
@@ -138,7 +138,7 @@ impl BitLinear {
             let end = (i + 1) * self.in_features;
             let activation_slice = &activations[start..end];
             
-            let (quantized_slice, scale) = quantize_activations_scalar(activation_slice);
+            let (quantized_slice, scale) = self::quantize_activations_scalar(activation_slice);
             all_quantized_activations_i8.extend(quantized_slice);
             all_activation_scales.push(scale);
         }
@@ -151,7 +151,7 @@ impl BitLinear {
         // --- End of New Logic ---
 
         // Step 1: Create buffers
-        let metadata = BitnetMetadata {
+        let metadata = kernels::BitnetMetadata {
             m: batch_size as u32,
             n: self.out_features as u32,
             k: self.in_features as u32,
@@ -277,7 +277,7 @@ impl BitLinear {
             sender.send(result).unwrap();
         });
         if let Err(e) = device.poll(wgpu::MaintainBase::Wait) {
-            eprintln!("[wgpu::Device::poll] error: {:?}", e);
+            log::error!("[wgpu::Device::poll] error: {:?}", e);
         }
 
         if let Some(Ok(())) = receiver.receive().await {
@@ -304,56 +304,41 @@ impl BitLinear {
         let packed_per_row = (in_features + 15) / 16;
         // Defensive: check shape validity
         if self.packed_weights.len() < out_features * packed_per_row || self.weight_scales.len() < out_features {
-            eprintln!("[BitLinear::forward_cpu] Shape mismatch: packed_weights={}, expected={}, weight_scales={}, expected={}",
+            log::error!("[BitLinear::forward_cpu] Shape mismatch: packed_weights={}, expected={}, weight_scales={}, expected={}",
                 self.packed_weights.len(), out_features * packed_per_row, self.weight_scales.len(), out_features);
             return vec![0.0; batch_size * out_features];
         }
         debug_assert_eq!(self.weight_scales.len(), out_features, "weight_scales shape mismatch");
         debug_assert!(self.packed_weights.len() >= out_features * packed_per_row, "packed_weights shape mismatch");
+
+        // Quantize activations (batch)
         let mut all_quantized_activations_i8: Vec<i8> = Vec::with_capacity(activations.len());
         let mut all_activation_scales: Vec<f32> = Vec::with_capacity(batch_size);
         for i in 0..batch_size {
             let start = i * in_features;
             let end = (i + 1) * in_features;
             let activation_slice = &activations[start..end];
-            let (quantized_slice, scale) = crate::bitnet_linear::quantize_activations_scalar(activation_slice);
+            let (quantized_slice, scale) = self::quantize_activations_scalar(activation_slice);
             all_quantized_activations_i8.extend(quantized_slice);
             all_activation_scales.push(scale);
         }
-        // Scalar quantized matmul, parallel over batch
-        let mut output = vec![0.0; batch_size * out_features];
-        output.par_chunks_mut(out_features)
-            .enumerate()
-            .for_each(|(batch_idx, output_chunk)| {
-                let activation_scale = all_activation_scales[batch_idx];
-                let activations_start = batch_idx * in_features;
-                for out_idx in 0..out_features {
-                    let mut sum = 0i32;
-                    // Defensive: check bounds
-                    if out_idx >= self.weight_scales.len() { continue; }
-                    let weight_scale = self.weight_scales[out_idx];
-                    let weights_start = out_idx * packed_per_row;
-                    for k_idx in 0..packed_per_row {
-                        if weights_start + k_idx >= self.packed_weights.len() { continue; }
-                        let packed_weight = self.packed_weights[weights_start + k_idx];
-                        let act_base = activations_start + k_idx * 16;
-                        for bit_idx in 0..16 {
-                            let packed_bits = (packed_weight >> (bit_idx * 2)) & 0b11;
-                            let weight_val = match packed_bits {
-                                1 => 1i8,   // 01
-                                2 => -1i8,  // 10
-                                _ => 0i8,   // 00 or 11
-                            };
-                            // Bounds check for last chunk
-                            if act_base + bit_idx < all_quantized_activations_i8.len() {
-                                sum += (all_quantized_activations_i8[act_base + bit_idx] as i32) * (weight_val as i32);
-                            }
-                        }
-                    }
-                    output_chunk[out_idx] = (sum as f32) * activation_scale * weight_scale;
-                }
-            });
-        output
+
+        // Always use the real CPU kernel dispatcher, regardless of features
+        match kernels::cpu::execute(
+            &all_quantized_activations_i8,
+            &self.packed_weights,
+            &all_activation_scales,
+            &self.weight_scales,
+            batch_size,
+            self.in_features,
+            self.out_features,
+        ) {
+            Ok(output) => output,
+            Err(e) => {
+                log::error!("[BitLinear::forward_cpu] CPU kernel error: {:?}", e);
+                vec![0.0; batch_size * out_features]
+            }
+        }
     }
 }
 

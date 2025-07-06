@@ -1,3 +1,7 @@
+//! File combining and manipulation utilities for BitNet projects.
+//!
+//! Provides functions to combine files, check file types, and filter files by extension.
+
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};

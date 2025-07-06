@@ -50,8 +50,8 @@ impl RotaryEmbedding {
             return;
         }
         
-        println!("[BitNet][RoPE] Growing tables: current_seq_len={}, new_max_seq_len={}, half_head_dim={}", 
-                 current_seq_len, new_max_seq_len, half_head_dim);
+        log::info!("[BitNet][RoPE] Growing tables: current_seq_len={}, new_max_seq_len={}, half_head_dim={}",
+            current_seq_len, new_max_seq_len, half_head_dim);
         
         // Pre-compute the inverse frequencies
         let inv_freq: Vec<f32> = (0..self.head_dim)
@@ -73,8 +73,8 @@ impl RotaryEmbedding {
             }
         }
         
-        println!("[BitNet][RoPE] After grow: sin.len()={}, cos.len()={}", 
-                 self.sin.len(), self.cos.len());
+        log::info!("[BitNet][RoPE] After grow: sin.len()={}, cos.len()={}",
+            self.sin.len(), self.cos.len());
         
         // Verify the tables are correctly sized
         debug_assert_eq!(self.sin.len(), new_max_seq_len * half_head_dim);
@@ -103,7 +103,7 @@ impl RotaryEmbedding {
         
         let call_count = ROPE_FORWARD_CALLS.fetch_add(1, Ordering::Relaxed);
         if call_count < 2 {
-            println!("[BitNet][RoPE] forward: pos_offset={}, seq_len={}, half_head_dim={}, sin.len()={}, cos.len()={}",
+            log::debug!("[BitNet][RoPE] forward: pos_offset={}, seq_len={}, half_head_dim={}, sin.len()={}, cos.len()={}",
                 pos_offset, seq_len, half_head_dim, self.sin.len(), self.cos.len());
         }
         
@@ -117,8 +117,9 @@ impl RotaryEmbedding {
                 
                 // Additional safety check - this should never trigger after ensure_capacity
                 if table_offset + half_head_dim > table_len {
-                    eprintln!("[BitNet][RoPE][ERROR] Insufficient table capacity: need {}, have {}", 
-                             table_offset + half_head_dim, table_len);
+                    let required = table_offset + half_head_dim;
+                    log::error!("[BitNet][RoPE][ERROR] Insufficient table capacity: need {}, have {}",
+                        required, self.sin.len());
                     continue;
                 }
                 
@@ -135,8 +136,9 @@ impl RotaryEmbedding {
                     
                     // Bounds check for input tensor
                     if idx1 >= x.len() {
-                        eprintln!("[BitNet][RoPE][ERROR] Input tensor index out of bounds: {} >= {}", 
-                                 idx1, x.len());
+                        let idx = idx1;
+                        log::error!("[BitNet][RoPE][ERROR] Input tensor index out of bounds: {} >= {}",
+                            idx, self.sin.len());
                         break;
                     }
                     

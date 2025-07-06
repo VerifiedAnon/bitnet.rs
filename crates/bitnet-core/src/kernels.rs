@@ -207,6 +207,15 @@ pub fn calculate_weight_scales(weights: &[Vec<i8>]) -> Vec<f32> {
     }).collect()
 }
 
+// --- Backend-specific modules ---
+pub mod cpu;
+// #[cfg(feature = "gpu")]
+// pub mod wgpu {
+//     //! GPU-specific kernels for BitNet operations (WGSL, wgpu, etc).
+//     //!
+//     //! Add GPU compute shader logic here.
+// }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,7 +247,7 @@ mod tests {
         let expected_row1 = 0b01100001001001000001100001001001u32;
         assert_eq!(packed[1], expected_row1, "Packed weights for row 1 don't match corrected pattern.\nExpected: {:032b}\nGot:      {:032b}", expected_row1, packed[1]);
         
-        println!("[TEST] test_weight_packing (took {:.2?})", t0.elapsed());
+        log::debug!("[TEST] test_weight_packing (took {:.2?})", t0.elapsed());
     }
 
     #[test]
@@ -258,7 +267,7 @@ mod tests {
         assert!((scales[2] - 1.0).abs() < 1e-6);
         assert!((scales[3] - 1.0).abs() < 1e-6);
         
-        println!("[TEST] test_weight_scales (took {:.2?})", t0.elapsed());
+        log::debug!("[TEST] test_weight_scales (took {:.2?})", t0.elapsed());
     }
 
     #[test]
@@ -267,7 +276,7 @@ mod tests {
         let weights = vec![vec![2i8; 16]]; // Invalid weight value
         let result = pack_ternary_weights(&weights);
         assert!(matches!(result, Err(BitNetError::InvalidWeightValue(2))), "Expected InvalidWeightValue error, but got {:?}", result);
-        println!("[TEST] test_invalid_weight_value (took {:.2?})", t0.elapsed());
+        log::debug!("[TEST] test_invalid_weight_value (took {:.2?})", t0.elapsed());
     }
 
     #[test]

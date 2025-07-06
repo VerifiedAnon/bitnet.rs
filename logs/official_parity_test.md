@@ -1,6 +1,6 @@
 # OFFICIAL_PARITY_TEST Test Report
 
-> Generated on: 2025-07-02 00:11:55
+> Generated on: 2025-07-02 00:39:28
 
 ## Test Results
 
@@ -12,11 +12,11 @@
 <summary>📝 View Full Log Dump</summary>
 
 ```
-[2025-07-02, 00:11:55.244] -> Running test_official_repo_presence...
-[2025-07-02, 00:11:55.245] -> Official BitNet repo already present at ../../References/official.
-[2025-07-02, 00:11:55.245] -> Official BitNet repo is present and ready for use.
-[2025-07-02, 00:11:55.245] -> GPU kernels path: ../../References/official/gpu (exists)
-[2025-07-02, 00:11:55.245] -> Preset kernels path: ../../References/official/preset_kernels (exists)
+[2025-07-02, 00:39:28.800] -> Running test_official_repo_presence...
+[2025-07-02, 00:39:28.801] -> Official BitNet repo already present at ../../References/official.
+[2025-07-02, 00:39:28.801] -> Official BitNet repo is present and ready for use.
+[2025-07-02, 00:39:28.801] -> GPU kernels path: ../../References/official/gpu (exists)
+[2025-07-02, 00:39:28.801] -> Preset kernels path: ../../References/official/preset_kernels (exists)
 ```
 
 </details>

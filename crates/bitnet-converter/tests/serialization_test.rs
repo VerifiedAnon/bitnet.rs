@@ -322,7 +322,7 @@ fn test_real_model_safetensors_roundtrip() {
 
 #[test]
 #[serial]
-#[ignore]
+
 fn test_all_serialization_sequentially() {
     let t0 = Instant::now();
     TEST_REPORTER.log_message(100, "STARTING SERIALIZATION TEST SUITE");

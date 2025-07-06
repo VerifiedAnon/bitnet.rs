@@ -73,6 +73,9 @@ fn test_pipeline_creation_cpu() {
             reporter: None,
             backend: PipelineBackend::Cpu,
             settings: None,
+            use_single_file: false,
+            log_level: None,
+            verbose: false,
         };
         let mut sys = System::new_all();
         sys.refresh_memory();
@@ -113,6 +116,9 @@ fn test_pipeline_creation_gpu() {
             reporter: None,
             backend: PipelineBackend::Gpu,
             settings: None,
+            use_single_file: false,
+            log_level: None,
+            verbose: false,
         };
         let mut sys = System::new_all();
         sys.refresh_memory();
@@ -166,15 +172,14 @@ fn test_model_ready() {
             reporter: None,
             backend: PipelineBackend::Auto,
             settings: None,
+            use_single_file: false,
+            log_level: None,
+            verbose: false,
         };
         let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
         let t2 = Instant::now();
-        match pipeline.ensure_model_ready().await {
-            Ok(_) => reporter.log_message(2, "ensure_model_ready succeeded"),
-            Err(e) => {
-                reporter.record_failure("Model Ready", &format!("Failed to prepare model: {e}"), None);
-            }
-        }
+        // Model is ready after Pipeline::new, so just log success
+        reporter.log_message(2, "Pipeline is ready after construction (ensure_model_ready removed)");
         let t3 = t2.elapsed();
         reporter.record_timing("Model Ready", t3);
         drop(pipeline);
@@ -199,9 +204,11 @@ fn test_cpu_inference() {
             reporter: None,
             backend: PipelineBackend::Cpu,
             settings: Some(settings.clone()),
+            use_single_file: false,
+            log_level: None,
+            verbose: false,
         };
         let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
-        pipeline.ensure_model_ready().await.expect("Failed to prepare model");
         for (i, case) in golden_cases().iter().enumerate() {
             let t4 = Instant::now();
             let result = match pipeline.run_inference(case.prompt).await {
@@ -234,6 +241,62 @@ fn test_cpu_inference() {
     });
 }
 
+#[test]
+#[serial]
+#[ignore]
+fn test_cpu_inference_single_file() {
+    ThreadPoolBuilder::new().num_threads(num_cpus::get()).build_global().ok();
+    println!("[BitNet] [CPU] Rayon thread pool size: {}", rayon::current_num_threads());
+    let reporter = &*TEST_REPORTER;
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let settings = InferenceSettings::default().with_max_new_tokens(1);
+        let options = PipelineOptions {
+            model_id: None,
+            input_dir: Some(std::path::PathBuf::from(r"E:/Desktop/Bitnet rs/models/Converted/microsoft/bitnet-b1.58-2B-4T-bf16")),
+            output_dir: None,
+            reporter: None,
+            backend: PipelineBackend::Cpu,
+            settings: Some(settings.clone()),
+            use_single_file: true,
+            log_level: None,
+            verbose: false,
+        };
+        // Create the pipeline ONCE and reuse for all prompts
+        let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
+        for (i, case) in golden_cases().iter().enumerate() {
+            let t4 = Instant::now();
+            let result = match pipeline.run_inference(case.prompt).await {
+                Ok(r) => r,
+                Err(e) => {
+                    reporter.record_failure(&format!("CPU Inference SingleFile (case {i})"), &format!("Inference failed: {e}"), None);
+                    continue;
+                }
+            };
+            // Print prompt and decoded top token to terminal
+            println!("Prompt: '{:?}' -> Top token: '{}'", case.prompt, result.top_token);
+            let t5 = t4.elapsed();
+            reporter.record_timing(&format!("CPU Inference SingleFile (case {i})"), t5);
+            reporter.log_message(3, &format!("[GOLDEN] Top token for \"{}\": {}", case.prompt, result.top_token));
+            if result.logits.is_empty() {
+                reporter.record_failure(&format!("CPU Inference SingleFile (case {i})"), "Logits vector is empty", None);
+            }
+            if !result.logits.iter().all(|&l| l.is_finite()) {
+                reporter.record_failure(&format!("CPU Inference SingleFile (case {i})"), "Logits contain NaN or Infinity", None);
+            }
+            if result.top_token != case.expected_top_token {
+                reporter.record_failure(&format!("CPU Inference SingleFile (case {i})"), &format!("Golden output mismatch: expected '{}' , got '{}'", case.expected_top_token, result.top_token), None);
+            }
+            if result.stopped_by_eos {
+                reporter.log_message(3, "[GENERATION] Stopped by EOS token");
+            } else if result.stopped_by_max_tokens {
+                reporter.log_message(3, "[GENERATION] Stopped by max_tokens");
+            }
+        }
+        drop(pipeline);
+    });
+}
+
 // --- Test 4: GPU Inference ---
 #[test]
 #[serial]
@@ -249,12 +312,11 @@ fn test_gpu_inference() {
             reporter: None,
             backend: PipelineBackend::Gpu,
             settings: None,
+            use_single_file: false,
+            log_level: None,
+            verbose: false,
         };
         let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
-        if let Err(e) = pipeline.ensure_model_ready().await {
-            reporter.record_failure("GPU Inference", &format!("Failed to prepare model: {e}"), None);
-            return;
-        }
         for (i, case) in golden_cases().iter().enumerate() {
             let t4 = Instant::now();
             let result = match pipeline.run_inference(case.prompt).await {
@@ -296,9 +358,11 @@ fn test_performance_metrics() {
             reporter: None,
             backend: PipelineBackend::Cpu,
             settings: None,
+            use_single_file: false,
+            log_level: None,
+            verbose: false,
         };
         let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
-        pipeline.ensure_model_ready().await.expect("Failed to prepare model");
         let prompt = "Performance test prompt.";
         let settings = InferenceSettings::default().with_max_new_tokens(32);
         let t0 = Instant::now();
@@ -334,9 +398,11 @@ fn test_settings_integration() {
             reporter: None,
             backend: PipelineBackend::Cpu,
             settings: Some(settings.clone()),
+            use_single_file: false,
+            log_level: None,
+            verbose: false,
         };
         let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
-        pipeline.ensure_model_ready().await.expect("Failed to prepare model");
         let prompt = "Settings integration test.";
         let result = pipeline.run_inference(prompt).await.expect("Inference failed");
         reporter.log_message(6, &format!("Settings test: top_token={}, logits_len={}, settings={:?}", result.top_token, result.logits.len(), settings));

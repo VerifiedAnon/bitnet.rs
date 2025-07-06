@@ -54,6 +54,7 @@ use crate::rope::RotaryEmbedding;
 use crate::wgpu_context::WgpuContext;
 use bitnet_converter::packer::BitLinearRecord;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use log;
 
 /// Configuration for the Attention layer.
 #[derive(Debug, Clone)]
@@ -167,15 +168,15 @@ pub struct Attention {
     /// Value projection
     pub v_proj: BitLinear,
     /// Output projection
-    o_proj: BitLinear,
+    pub o_proj: BitLinear,
     /// Rotary position embedding
-    rotary_emb: RotaryEmbedding,
+    pub rotary_emb: RotaryEmbedding,
     /// Number of attention heads
-    num_heads: usize,
+    pub num_heads: usize,
     /// Number of key/value heads
-    num_kv_heads: usize,
+    pub num_kv_heads: usize,
     /// Dimension of each head
-    head_dim: usize,
+    pub head_dim: usize,
 }
 
 impl Attention {
@@ -336,7 +337,7 @@ impl Attention {
         };
         let log_count = ATTENTION_LOG_CALLS.fetch_add(1, Ordering::Relaxed);
         if log_count < 2 {
-            println!(
+            log::debug!(
                 "[BitNet][Attention] num_heads={}, num_kv_heads={}, head_dim={}, seq_len={}, q.len()={}, k.len={}, v.len={}, x.len={}, hidden_size={}",
                 self.num_heads, self.num_kv_heads, self.head_dim, seq_len, q.len(), k.len(), v.len(), x.len(), hidden_size
             );
