@@ -143,8 +143,8 @@ pub struct BitNetModelRecord {
     pub blocks: Vec<TransformerBlockRecord>,
     /// Final norm record.
     pub norm: RmsNormRecord,
-    /// LM head record.
-    pub lm_head: EmbeddingRecord,
+    /// LM head record (quantized/packed).
+    pub lm_head: BitLinearRecord,
     /// Model metadata.
     pub metadata: ModelMetadata,
 }
@@ -531,7 +531,7 @@ fn extract_norm(tensor_map: &mut RichTensorMap) -> ConvResult<RmsNormRecord> {
     Ok(RmsNormRecord { weight, shape })
 }
 
-fn extract_lm_head(tensor_map: &mut RichTensorMap, embedding: &EmbeddingRecord) -> ConvResult<EmbeddingRecord> {
+fn extract_lm_head(tensor_map: &mut RichTensorMap, embedding: &EmbeddingRecord) -> ConvResult<BitLinearRecord> {
     if let Some((data, shape)) = tensor_map.remove("lm_head.weight") {
         let weight = match data {
             TensorData::F32(v) | TensorData::BF16(v) => v,
@@ -541,7 +541,7 @@ fn extract_lm_head(tensor_map: &mut RichTensorMap, embedding: &EmbeddingRecord) 
                 actual: vec![],
             }),
         };
-        Ok(EmbeddingRecord { weight, shape })
+        create_bit_linear_record(weight, &shape)
     } else if let Some((data, shape)) = tensor_map.remove("output.weight") {
         let weight = match data {
             TensorData::F32(v) | TensorData::BF16(v) => v,
@@ -551,10 +551,11 @@ fn extract_lm_head(tensor_map: &mut RichTensorMap, embedding: &EmbeddingRecord) 
                 actual: vec![],
             }),
         };
-        Ok(EmbeddingRecord { weight, shape })
+        create_bit_linear_record(weight, &shape)
     } else {
         log::warn!("No lm_head.weight or output.weight found; using tied embeddings");
-        Ok(embedding.clone())
+        // Fallback: use embedding weights (tied)
+        create_bit_linear_record(embedding.weight.clone(), &embedding.shape)
     }
 }
 
@@ -800,13 +801,19 @@ pub fn export_quantized_to_safetensors(
             bytemuck::cast_slice(&u16_vec).to_vec()
         },
     ));
-    // LM Head
+    // LM Head (packed/quantized)
     tensor_specs.push((
         "output.weight".to_string(),
+        Dtype::U32,
+        vec![model.lm_head.out_features, model.lm_head.in_features / 16],
+        bytemuck::cast_slice(&model.lm_head.packed_weights).to_vec(),
+    ));
+    tensor_specs.push((
+        "output.weight_scale".to_string(),
         Dtype::BF16,
-        model.lm_head.shape.clone(),
+        vec![model.lm_head.weight_scales.len()],
         {
-            let bf16_vec: Vec<bf16> = model.lm_head.weight.iter().map(|&f| bf16::from_f32(f)).collect();
+            let bf16_vec: Vec<bf16> = model.lm_head.weight_scales.iter().map(|&f| bf16::from_f32(f)).collect();
             let u16_vec: Vec<u16> = bf16_vec.iter().map(|b| b.to_bits()).collect();
             bytemuck::cast_slice(&u16_vec).to_vec()
         },

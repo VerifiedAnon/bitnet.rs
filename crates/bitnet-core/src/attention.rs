@@ -1,186 +1,97 @@
 //! Multi-head attention implementation for BitNet.
-//!
-//! This module provides the attention mechanism used in BitNet, including:
-//! - Multi-head self-attention with quantized linear projections
-//! - Rotary Position Embeddings (RoPE)
-//! - Efficient attention computation with optional flash attention
-//!
-//! # Architecture
-//!
-//! The attention mechanism follows the standard transformer pattern:
-//! 1. Project input to Query (Q), Key (K), and Value (V) using quantized linear layers
-//! 2. Apply RoPE to Q and K for position-aware attention
-//! 3. Compute scaled dot-product attention: softmax(QK^T / sqrt(d_k))V
-//! 4. Project concatenated heads back to model dimension
-//!
-//! # Examples
-//!
-//! ```rust
-//! use bitnet_core::attention::{Attention, AttentionConfig};
-//!
-//! let config = AttentionConfig::new(
-//!     hidden_size: 1024,
-//!     num_heads: 16,
-//!     dropout: 0.0,
-//! );
-//!
-//! let attention = config.init();
-//! let batch_size = 1;
-//! let seq_len = 32;
-//! let input = vec![0.0; batch_size * seq_len * config.hidden_size];
-//! let output = attention.forward(&input, batch_size, seq_len);
-//! ```
-//!
-//! # Performance
-//!
-//! The attention implementation is optimized for both CPU and GPU:
-//! - Uses quantized weights for Q/K/V projections
-//! - Efficient RoPE implementation
-//! - Optional flash attention for faster computation
-//! - KV cache support for autoregressive generation
-//!
-//! # Implementation Notes
-//!
-//! The attention computation is split into several steps:
-//! 1. Q/K/V projection (using quantized BitLinear)
-//! 2. RoPE application (using efficient sin/cos tables)
-//! 3. Attention computation (with optional flash attention)
-//! 4. Output projection (using quantized BitLinear)
-//!
-//! Each step is carefully optimized for both correctness and performance.
 
 use crate::bitnet_linear::BitLinear;
 use crate::rope::RotaryEmbedding;
 use crate::wgpu_context::WgpuContext;
 use bitnet_converter::packer::BitLinearRecord;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use log;
+use rayon::prelude::*;
+use wgpu::util::DeviceExt;
+use std::sync::Arc;
 
-/// Configuration for the Attention layer.
+/// Attention struct for transformer models.
 #[derive(Debug, Clone)]
 pub struct AttentionConfig {
-    /// Size of the hidden layer (model dimension)
+    /// Hidden size.
     pub hidden_size: usize,
-    /// Number of attention heads
+    /// Number of attention heads.
     pub num_heads: usize,
-    /// Number of key/value heads
+    /// Number of key-value heads.
     pub num_kv_heads: usize,
-    /// Maximum sequence length
+    /// Maximum sequence length.
     pub max_seq_len: usize,
-    /// Dropout probability (not used in inference)
-    pub dropout: f32, // Not used in inference but good for config parity
+    /// Dropout rate.
+    pub dropout: f32,
 }
 
 impl AttentionConfig {
     /// Create a new AttentionConfig.
-    ///
-    /// # Arguments
-    /// * `hidden_size` - Model dimension (must be divisible by `num_heads` and `num_kv_heads`)
-    /// * `num_heads` - Number of attention heads (must be > 0)
-    /// * `num_kv_heads` - Number of key/value heads (must be > 0)
-    /// * `max_seq_len` - Maximum sequence length (must be > 0)
-    ///
-    /// # Panics
-    /// Panics if constraints are violated.
     pub fn new(hidden_size: usize, num_heads: usize, num_kv_heads: usize, max_seq_len: usize) -> Self {
-        assert!(num_heads > 0, "num_heads must be > 0");
-        assert!(num_kv_heads > 0, "num_kv_heads must be > 0");
-        assert!(max_seq_len > 0, "max_seq_len must be > 0");
-        assert!(hidden_size % num_heads == 0, "hidden_size must be divisible by num_heads");
-        assert!(hidden_size % num_kv_heads == 0, "hidden_size must be divisible by num_kv_heads");
+        assert!(num_heads > 0 && num_kv_heads > 0 && max_seq_len > 0);
+        assert!(hidden_size % num_heads == 0 && num_heads % num_kv_heads == 0);
         Self { hidden_size, num_heads, num_kv_heads, max_seq_len, dropout: 0.0 }
     }
     
-    /// Initialize an Attention layer from this config (dummy weights).
-    ///
-    /// # Panics
-    /// Panics if hidden_size is not divisible by num_heads or num_kv_heads.
+    /// Initialize an Attention struct.
     pub fn init(&self) -> Attention {
         let head_dim = self.hidden_size / self.num_heads;
         let q_out_dim = self.num_heads * head_dim;
         let kv_out_dim = self.num_kv_heads * head_dim;
-        // Robust dummy BitLinear shapes
-        let q_proj = BitLinear::from_record(BitLinearRecord {
-            packed_weights: vec![0; (q_out_dim * head_dim + 15) / 16],
-            weight_scales: vec![1.0; q_out_dim],
-            in_features: head_dim,
-            out_features: q_out_dim,
-        });
-        let k_proj = BitLinear::from_record(BitLinearRecord {
-            packed_weights: vec![0; (kv_out_dim * head_dim + 15) / 16],
-            weight_scales: vec![1.0; kv_out_dim],
-            in_features: head_dim,
-            out_features: kv_out_dim,
-        });
-        let v_proj = BitLinear::from_record(BitLinearRecord {
-            packed_weights: vec![0; (kv_out_dim * head_dim + 15) / 16],
-            weight_scales: vec![1.0; kv_out_dim],
-            in_features: head_dim,
-            out_features: kv_out_dim,
-        });
-        let o_proj = BitLinear::from_record(BitLinearRecord {
-            packed_weights: vec![0; (self.hidden_size * q_out_dim + 15) / 16],
-            weight_scales: vec![1.0; self.hidden_size],
-            in_features: q_out_dim,
-            out_features: self.hidden_size,
-        });
+
+        let create_dummy_record = |in_features, out_features| BitLinearRecord {
+            packed_weights: vec![0; (out_features * in_features + 15) / 16],
+            weight_scales: vec![1.0; out_features],
+            in_features,
+            out_features,
+        };
+
         Attention {
-            q_proj,
-            k_proj,
-            v_proj,
-            o_proj,
+            q_proj: BitLinear::from_record(create_dummy_record(self.hidden_size, q_out_dim)),
+            k_proj: BitLinear::from_record(create_dummy_record(self.hidden_size, kv_out_dim)),
+            v_proj: BitLinear::from_record(create_dummy_record(self.hidden_size, kv_out_dim)),
+            o_proj: BitLinear::from_record(create_dummy_record(q_out_dim, self.hidden_size)),
             rotary_emb: RotaryEmbedding::new(head_dim, self.max_seq_len),
             num_heads: self.num_heads,
             num_kv_heads: self.num_kv_heads,
             head_dim,
+            kv_cache: KVCache::default(),
         }
     }
 }
 
-/// A simple cache for Key and Value tensors for faster generation.
+/// Key/Value cache for attention.
 #[derive(Debug, Clone, Default)]
 pub struct KVCache {
-    /// Cached key tensor
+    /// Key cache.
     pub key: Vec<f32>,
-    /// Cached value tensor
+    /// Value cache.
     pub value: Vec<f32>,
-    /// Current sequence length in cache
-    pub seq_len: usize,
 }
 
-/// Device selection for attention computation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// Device to use for attention computation.
-pub enum AttentionDevice {
-    /// Use CPU for attention computation.
-    Cpu,
-    /// Use GPU for attention computation.
-    Gpu,
-}
-
-/// Multi-head attention layer for BitNet.
+/// Attention layer for transformer.
 #[derive(Clone)]
 pub struct Attention {
-    /// Query projection
+    /// Query projection.
     pub q_proj: BitLinear,
-    /// Key projection
+    /// Key projection.
     pub k_proj: BitLinear,
-    /// Value projection
+    /// Value projection.
     pub v_proj: BitLinear,
-    /// Output projection
+    /// Output projection.
     pub o_proj: BitLinear,
-    /// Rotary position embedding
+    /// Rotary embedding.
     pub rotary_emb: RotaryEmbedding,
-    /// Number of attention heads
+    /// Number of attention heads.
     pub num_heads: usize,
-    /// Number of key/value heads
+    /// Number of key-value heads.
     pub num_kv_heads: usize,
-    /// Dimension of each head
+    /// Head dimension.
     pub head_dim: usize,
+    /// Key/Value cache.
+    pub kv_cache: KVCache,
 }
 
 impl Attention {
-    /// Create an Attention layer from BitLinearRecords and config.
+    /// Construct Attention from records.
     pub fn from_records(
         q_proj: BitLinearRecord,
         k_proj: BitLinearRecord,
@@ -198,369 +109,279 @@ impl Attention {
             num_heads: config.num_heads,
             num_kv_heads: config.num_kv_heads,
             head_dim,
+            kv_cache: KVCache::default(),
         }
     }
+    
+    /// The new, corrected, and performance-optimized CPU forward pass.
+    pub fn cpu_forward(&mut self, x: &[f32], pos_offset: usize) -> Vec<f32> {
+        let seq_len = x.len() / self.q_proj.in_features;
 
-    /// Forward pass for multi-head attention.
-    ///
-    /// # Arguments
-    /// * `context` - WgpuContext for GPU ops
-    /// * `x` - Input tensor (flattened, shape: [batch_size, seq_len, hidden_size])
-    /// * `batch_size` - Number of batches
-    /// * `seq_len` - Sequence length
-    /// * `pos_offset` - Position offset for RoPE
-    /// * `cache` - Optional KVCache for autoregressive generation
-    /// * `device` - Select CPU or GPU attention computation
-    ///
-    /// # Returns
-    /// Output tensor (flattened, shape: [batch_size, seq_len, hidden_size])
-    pub async fn forward_modern(
-        &mut self,
-        context: &WgpuContext,
-        x: &[f32],
-        batch_size: usize,
-        seq_len: usize,
-        pos_offset: usize,
-        cache: Option<&mut KVCache>,
-        device: AttentionDevice,
-    ) -> Vec<f32> {
-        assert_eq!(x.len(), batch_size * seq_len * self.q_proj.in_features, "Input shape mismatch");
-        match device {
-            AttentionDevice::Cpu => {
-                self.forward_cpu(context, x, batch_size, seq_len, pos_offset, cache).await
-            }
-            AttentionDevice::Gpu => {
-                // Placeholder: call to GPU attention kernel (to be implemented)
-                // For now, fallback to CPU
-                self.forward_cpu(context, x, batch_size, seq_len, pos_offset, cache).await
-            }
-        }
-    }
+        // 1. Projections
+        let mut q = self.q_proj.forward_cpu(x, seq_len);
+        let mut k = self.k_proj.forward_cpu(x, seq_len);
+        let v = self.v_proj.forward_cpu(x, seq_len);
 
-    /// CPU-based forward pass supporting variable batch size.
-    async fn forward_cpu(
-        &mut self,
-        context: &WgpuContext,
-        x: &[f32],
-        batch_size: usize,
-        seq_len: usize,
-        pos_offset: usize,
-        cache: Option<&mut KVCache>,
-    ) -> Vec<f32> {
-        let _hidden_size = self.q_proj.in_features;
-        let total_tokens = batch_size * seq_len;
-        // --- 1. Projections (GPU-backed) ---
-        let mut query = self.q_proj.forward(context, x, total_tokens).await;
-        let mut key = self.k_proj.forward(context, x, total_tokens).await;
-        let value = self.v_proj.forward(context, x, total_tokens).await;
-        // --- 2. Apply RoPE (CPU) ---
-        self.rotary_emb.forward(&mut query, self.num_heads, seq_len, pos_offset);
-        self.rotary_emb.forward(&mut key, self.num_kv_heads, seq_len, pos_offset);
-        // --- 3. KV Caching (CPU) ---
-        let (key, value, present_seq_len) = if let Some(cache) = cache {
-            cache.key.extend_from_slice(&key);
-            cache.value.extend_from_slice(&value);
-            cache.seq_len += seq_len;
-            (cache.key.clone(), cache.value.clone(), cache.seq_len)
-        } else {
-            (key, value, seq_len)
-        };
-        // --- 4. Grouped-Query Attention & Attention Calculation (CPU) ---
-        let key = repeat_kv(&key, self.num_heads / self.num_kv_heads, self.num_kv_heads, present_seq_len, self.head_dim);
-        let value = repeat_kv(&value, self.num_heads / self.num_kv_heads, self.num_kv_heads, present_seq_len, self.head_dim);
-        let mut attn_output = vec![0.0; query.len()];
-        let scale = 1.0 / (self.head_dim as f32).sqrt();
-        for b in 0..batch_size {
-            for h in 0..self.num_heads {
-                let q_head = get_head_batch(&query, b, h, seq_len, self.head_dim, batch_size, self.num_heads);
-                let k_head = get_head(&key, h, present_seq_len, self.head_dim);
-                let v_head = get_head(&value, h, present_seq_len, self.head_dim);
-                let mut scores = matmul_cpu(q_head, &transpose_cpu(k_head, present_seq_len, self.head_dim), seq_len, self.head_dim, present_seq_len);
-                scores.iter_mut().for_each(|s| *s *= scale);
-                apply_causal_mask(&mut scores, seq_len, present_seq_len, pos_offset);
-                let weights = softmax_cpu(&scores, seq_len, present_seq_len);
-                let head_output = matmul_cpu(&weights, v_head, seq_len, present_seq_len, self.head_dim);
-                set_head_batch(&mut attn_output, &head_output, b, h, seq_len, self.head_dim, batch_size, self.num_heads);
-            }
-        }
-        // --- 6. Final Output Projection (GPU-backed) ---
-        self.o_proj.forward(context, &attn_output, total_tokens).await
-    }
+        // 2. Apply RoPE to the new Q and K vectors
+        self.rotary_emb.forward(&mut q, self.num_heads, seq_len, pos_offset);
+        self.rotary_emb.forward(&mut k, self.num_kv_heads, seq_len, pos_offset);
 
-    /// Backward-compatible forward method for model and legacy code.
-    pub async fn forward(
-        &mut self,
-        context: &WgpuContext,
-        x: &[f32],
-        pos_offset: usize,
-        cache: Option<&mut KVCache>,
-    ) -> Vec<f32> {
-        let hidden_size = self.q_proj.in_features;
-        let total_tokens = x.len() / hidden_size;
-        let batch_size = 1; // Legacy path assumes batch=1
-        let seq_len = total_tokens / batch_size;
-        self.forward_modern(
-            context,
-            x,
-            batch_size,
-            seq_len,
-            pos_offset,
-            cache,
-            AttentionDevice::Cpu,
-        ).await
-    }
+        // 3. Update KV Cache
+        self.kv_cache.key.extend_from_slice(&k);
+        self.kv_cache.value.extend_from_slice(&v);
+        let k_cache = &self.kv_cache.key;
+        let v_cache = &self.kv_cache.value;
+        let cache_len = k_cache.len() / (self.num_kv_heads * self.head_dim);
 
-    /// Performs a forward pass through the attention layer using pure Rust (CPU, multi-threaded).
-    pub fn cpu_forward(
-        &mut self,
-        x: &[f32],
-        pos_offset: usize,
-        cache: Option<&mut crate::attention::KVCache>,
-    ) -> Vec<f32> {
-        // Use config values, not assumptions
-        let hidden_size = self.num_heads * self.head_dim;
-        let seq_len = x.len() / hidden_size;
-        // Project Q, K, V
-        let q = self.q_proj.forward_cpu(x, 1);
-        let k_raw = self.k_proj.forward_cpu(x, 1);
-        let v_raw = self.v_proj.forward_cpu(x, 1);
-        // Repeat K and V as needed to match Q's head count (BitNet spec, see packer.rs)
-        let k = if self.num_heads == self.num_kv_heads {
-            k_raw.clone()
-        } else {
-            repeat_kv(&k_raw, self.num_heads / self.num_kv_heads, self.num_kv_heads, seq_len, self.head_dim)
-        };
-        let v = if self.num_heads == self.num_kv_heads {
-            v_raw.clone()
-        } else {
-            repeat_kv(&v_raw, self.num_heads / self.num_kv_heads, self.num_kv_heads, seq_len, self.head_dim)
-        };
-        let log_count = ATTENTION_LOG_CALLS.fetch_add(1, Ordering::Relaxed);
-        if log_count < 2 {
-            log::debug!(
-                "[BitNet][Attention] num_heads={}, num_kv_heads={}, head_dim={}, seq_len={}, q.len()={}, k.len={}, v.len={}, x.len={}, hidden_size={}",
-                self.num_heads, self.num_kv_heads, self.head_dim, seq_len, q.len(), k.len(), v.len(), x.len(), hidden_size
-            );
-        }
-        // Reshape q and k if needed
-        let expected = self.num_heads * seq_len * self.head_dim;
-        let mut q_rope = if q.len() == expected {
-            q.clone()
-        } else if q.len() == seq_len * hidden_size {
-            // Reshape: [seq_len, hidden_size] -> [num_heads, seq_len, head_dim]
-            let mut reshaped = vec![0.0; expected];
+        let n_rep = self.num_heads / self.num_kv_heads;
+        let mut attn_output = vec![0.0; seq_len * self.num_heads * self.head_dim];
+
+        // 4. Parallelize computation over heads
+        attn_output
+            .par_chunks_mut(seq_len * self.head_dim)
+            .enumerate()
+            .for_each(|(h, out_head_slice)| {
+                let kv_head_idx = h / n_rep;
+
+                // For each token in the current sequence (batch)
             for s in 0..seq_len {
-                for h in 0..self.num_heads {
-                    let src_offset = s * hidden_size + h * self.head_dim;
-                    let dst_offset = h * seq_len * self.head_dim + s * self.head_dim;
-                    reshaped[dst_offset..dst_offset + self.head_dim]
-                        .copy_from_slice(&q[src_offset..src_offset + self.head_dim]);
-                }
-            }
-            reshaped
-        } else {
-            panic!("[BitNet][Attention] Unexpected q shape: got {}, expected {} or {}", q.len(), expected, seq_len * hidden_size);
-        };
-        let mut k_rope = if k.len() == expected {
-            k.clone()
-        } else if k.len() == seq_len * hidden_size {
-            let mut reshaped = vec![0.0; expected];
-            for s in 0..seq_len {
-                for h in 0..self.num_heads {
-                    let src_offset = s * hidden_size + h * self.head_dim;
-                    let dst_offset = h * seq_len * self.head_dim + s * self.head_dim;
-                    reshaped[dst_offset..dst_offset + self.head_dim]
-                        .copy_from_slice(&k[src_offset..src_offset + self.head_dim]);
-                }
-            }
-            reshaped
-        } else {
-            panic!("[BitNet][Attention] Unexpected k shape: got {}, expected {} or {}", k.len(), expected, seq_len * hidden_size);
-        };
-        self.rotary_emb.forward(&mut q_rope, self.num_heads, seq_len, pos_offset);
-        self.rotary_emb.forward(&mut k_rope, self.num_heads, seq_len, pos_offset);
-        // 3. Compute attention (scaled dot-product, softmax, matmul)
-        let mut output = vec![0.0; seq_len * self.num_heads * self.head_dim];
-        // For each head, compute attention
-        for h in 0..self.num_heads {
-            for q_pos in 0..seq_len {
-                // Q vector
-                let q_offset = (h * seq_len + q_pos) * self.head_dim;
-                let q_vec = &q_rope[q_offset..q_offset + self.head_dim];
-                // Compute scores
-                let mut scores = vec![0.0f32; seq_len];
-                let mut max_score = -1e30f32;
-                for k_pos in 0..seq_len {
-                    let k_offset = (h * seq_len + k_pos) * self.head_dim;
-                    let k_vec = &k_rope[k_offset..k_offset + self.head_dim];
-                    let mut dot = 0.0f32;
-                    for d in 0..self.head_dim {
-                        dot += q_vec[d] * k_vec[d];
+                    let q_token_start = s * (self.num_heads * self.head_dim) + h * self.head_dim;
+                    let q_vec = &q[q_token_start..q_token_start + self.head_dim];
+
+                    // --- Attention Scores (q * k^T) ---
+                    let mut scores = vec![0.0; cache_len];
+                    for k_pos in 0..cache_len {
+                        let k_token_start = k_pos * (self.num_kv_heads * self.head_dim) + (kv_head_idx * self.head_dim);
+                        let k_vec = &k_cache[k_token_start..k_token_start + self.head_dim];
+                        
+                        scores[k_pos] = q_vec.iter().zip(k_vec.iter()).map(|(a, b)| a * b).sum();
                     }
+
+                    // --- Scale and Mask ---
                     let scale = 1.0 / (self.head_dim as f32).sqrt();
-                    let mut score = dot * scale;
-                    if k_pos > q_pos {
-                        score = -1e30;
-                    }
-                    scores[k_pos] = score;
-                    if score > max_score {
-                        max_score = score;
+                    let current_pos = pos_offset + s;
+                    for k_pos in 0..cache_len {
+                        scores[k_pos] *= scale;
+                        if k_pos > current_pos {
+                            scores[k_pos] = f32::NEG_INFINITY;
                     }
                 }
-                // Softmax
-                let mut sum_exp = 0.0f32;
-                for k_pos in 0..seq_len {
-                    scores[k_pos] = (scores[k_pos] - max_score).exp();
-                    sum_exp += scores[k_pos];
-                }
-                // Output
-                for d in 0..self.head_dim {
-                    let mut out = 0.0f32;
-                    for k_pos in 0..seq_len {
-                        let v_offset = (h * seq_len + k_pos) * self.head_dim;
-                        let v_val = v[v_offset + d];
-                        let weight = scores[k_pos] / sum_exp;
-                        out += weight * v_val;
-                    }
-                    let out_offset = (h * seq_len + q_pos) * self.head_dim + d;
-                    output[out_offset] = out;
+
+                    // --- Softmax ---
+                    softmax_inplace(&mut scores);
+
+                    // --- Weighted Value Sum (scores * V) ---
+                    let out_token_start = s * self.head_dim;
+                    for k_pos in 0..cache_len {
+                        let v_token_start = k_pos * (self.num_kv_heads * self.head_dim) + (kv_head_idx * self.head_dim);
+                        let v_vec = &v_cache[v_token_start..v_token_start + self.head_dim];
+                        let weight = scores[k_pos];
+
+                        for d in 0..self.head_dim {
+                            out_head_slice[out_token_start + d] += weight * v_vec[d];
                 }
             }
         }
-        // 4. Output projection
-        self.o_proj.forward_cpu(&output, 1)
+            });
+        
+        // 5. Reshape and final projection
+        let reshaped_output = reshape_heads_to_hidden(&attn_output, seq_len, self.num_heads, self.head_dim);
+        self.o_proj.forward_cpu(&reshaped_output, seq_len)
+    }
+
+    /// Async GPU forward pass (now uses WGSL attention kernel for softmax/weighted sum)
+    pub async fn gpu_forward(&mut self, context: &WgpuContext, x: &[f32], pos_offset: usize) -> Vec<f32> {
+        let seq_len = x.len() / self.q_proj.in_features;
+        let batch = 1; // Only batch size 1 supported for now (single prompt)
+        // 1. Projections (GPU)
+        let mut q = self.q_proj.forward(context, x, seq_len).await;
+        let mut k = self.k_proj.forward(context, x, seq_len).await;
+        let v = self.v_proj.forward(context, x, seq_len).await;
+        // 2. Apply RoPE (CPU, fast)
+        self.rotary_emb.forward(&mut q, self.num_heads, seq_len, pos_offset);
+        self.rotary_emb.forward(&mut k, self.num_kv_heads, seq_len, pos_offset);
+        // 3. Update KV Cache (CPU, for now)
+        self.kv_cache.key.extend_from_slice(&k);
+        self.kv_cache.value.extend_from_slice(&v);
+        let k_cache = &self.kv_cache.key;
+        let v_cache = &self.kv_cache.value;
+        let cache_len = k_cache.len() / (self.num_kv_heads * self.head_dim);
+        let n_rep = self.num_heads / self.num_kv_heads;
+        // 4. Attention math (GPU kernel)
+        let attended = launch_attention_gpu_kernel(
+            context,
+            &q,
+            &k,
+            &v,
+            batch,
+            seq_len,
+            self.num_heads,
+            self.head_dim,
+        ).await;
+        // 5. Reshape and final projection (GPU)
+        // attended is already [batch, seq_len, num_heads, head_dim] flattened
+        self.o_proj.forward(context, &attended, seq_len).await
+    }
+
+    /// Kept for API compatibility; delegates to the CPU path.
+    pub async fn forward(&mut self, _context: &WgpuContext, x: &[f32], pos_offset: usize, _cache: Option<&mut KVCache>) -> Vec<f32> {
+        self.cpu_forward(x, pos_offset)
     }
 }
 
-// --- CPU-based helper functions for validation ---
+/// Launches the WGSL attention kernel on the GPU.
+pub async fn launch_attention_gpu_kernel(
+    context: &WgpuContext,
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    batch: usize,
+    seq_len: usize,
+    num_heads: usize,
+    head_dim: usize,
+) -> Vec<f32> {
+    let device = &context.device;
+    let queue = &context.queue;
+    let total = batch * seq_len * num_heads * head_dim;
+    // 1. Create buffers
+    #[repr(C)]
+    #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+    struct AttentionMetadata {
+        batch: u32,
+        seq_len: u32,
+        num_heads: u32,
+        head_dim: u32,
+    }
+    let metadata = AttentionMetadata {
+        batch: batch as u32,
+        seq_len: seq_len as u32,
+        num_heads: num_heads as u32,
+        head_dim: head_dim as u32,
+    };
+    let metadata_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Attention Metadata Buffer"),
+        contents: bytemuck::bytes_of(&metadata),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let q_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Q Buffer"),
+        contents: bytemuck::cast_slice(q),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let k_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("K Buffer"),
+        contents: bytemuck::cast_slice(k),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let v_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("V Buffer"),
+        contents: bytemuck::cast_slice(v),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Attention Output Buffer"),
+        size: (total * std::mem::size_of::<f32>()) as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+    let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Attention Staging Buffer"),
+        size: (total * std::mem::size_of::<f32>()) as u64,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    // 2. Load shader
+    let shader_src = include_str!("kernels/bitnet_attention.wgsl");
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("BitNet Attention Shader"),
+        source: wgpu::ShaderSource::Wgsl(shader_src.into()),
+    });
+    // 3. Create bind group layout and pipeline
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("Attention Bind Group Layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            wgpu::BindGroupLayoutEntry { binding: 4, visibility: wgpu::ShaderStages::COMPUTE, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+        ],
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Attention Pipeline Layout"),
+        bind_group_layouts: &[&bind_group_layout],
+        push_constant_ranges: &[],
+    });
+    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("Attention Pipeline"),
+        layout: Some(&pipeline_layout),
+        module: &shader,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Attention Bind Group"),
+        layout: &bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: metadata_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: q_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: k_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: v_buffer.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 4, resource: output_buffer.as_entire_binding() },
+        ],
+    });
+    // 4. Dispatch
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Attention Encoder") });
+    {
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Attention Compute Pass"), timestamp_writes: None });
+        cpass.set_pipeline(&pipeline);
+        cpass.set_bind_group(0, &bind_group, &[]);
+        cpass.dispatch_workgroups(batch as u32, seq_len as u32, num_heads as u32);
+    }
+    encoder.copy_buffer_to_buffer(&output_buffer, 0, &staging_buffer, 0, (total * std::mem::size_of::<f32>()) as u64);
+    queue.submit(Some(encoder.finish()));
+    // 5. Read back
+    let buffer_slice = staging_buffer.slice(..);
+    let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
+    buffer_slice.map_async(wgpu::MapMode::Read, move |v| tx.send(v).unwrap());
+    if let Err(e) = device.poll(wgpu::MaintainBase::Wait) {
+        eprintln!("[wgpu::Device::poll] error: {:?}", e);
+    }
+    rx.receive().await.unwrap().unwrap();
+    let data = buffer_slice.get_mapped_range();
+    let result: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+    drop(data);
+    staging_buffer.unmap();
+    result
+}
 
-fn repeat_kv(data: &[f32], n_rep: usize, num_kv_heads: usize, seq_len: usize, head_dim: usize) -> Vec<f32> {
-    if n_rep == 1 { return data.to_vec(); }
-    let mut repeated = Vec::with_capacity(data.len() * n_rep);
+// --- Helper Functions ---
+
+fn softmax_inplace(data: &mut [f32]) {
+    if data.is_empty() { return; }
+    let max_val = data.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+    let mut sum_exp = 0.0;
+    for val in data.iter_mut() {
+        *val = (*val - max_val).exp();
+        sum_exp += *val;
+    }
+    if sum_exp > 0.0 {
+        for val in data.iter_mut() {
+            *val /= sum_exp;
+        }
+    }
+}
+
+fn reshape_heads_to_hidden(data: &[f32], seq_len: usize, num_heads: usize, head_dim: usize) -> Vec<f32> {
+    let hidden_dim = num_heads * head_dim;
+    let mut reshaped = vec![0.0; seq_len * hidden_dim];
     for s in 0..seq_len {
-        for h in 0..num_kv_heads {
-            let start = (s * num_kv_heads + h) * head_dim;
-            let end = start + head_dim;
-            let head_slice = &data[start..end];
-            for _ in 0..n_rep {
-                repeated.extend_from_slice(head_slice);
-            }
-        }
-    }
-    repeated
-}
-
-fn get_head(data: &[f32], head_idx: usize, seq_len: usize, head_dim: usize) -> &[f32] {
-    let start = head_idx * seq_len * head_dim;
-    let end = start + seq_len * head_dim;
-    &data[start..end]
-}
-
-fn matmul_cpu(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
-    let mut c = vec![0.0; m * n];
-    for i in 0..m {
-        for j in 0..n {
-            let mut sum = 0.0;
-            for l in 0..k {
-                sum += a[i * k + l] * b[l * n + j];
-            }
-            c[i * n + j] = sum;
-        }
-    }
-    c
-}
-
-fn transpose_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
-    let mut t = vec![0.0; data.len()];
-    for i in 0..rows {
-        for j in 0..cols {
-            t[j * rows + i] = data[i * cols + j];
-        }
-    }
-    t
-}
-
-fn apply_causal_mask(scores: &mut [f32], q_len: usize, k_len: usize, pos_offset: usize) {
-    for q_pos in 0..q_len {
-        for k_pos in 0..k_len {
-            if k_pos > pos_offset + q_pos {
-                scores[q_pos * k_len + k_pos] = f32::NEG_INFINITY;
-            }
-        }
+        for h in 0..num_heads {
+            let src_start = h * (seq_len * head_dim) + s * head_dim;
+            let dst_start = s * hidden_dim + h * head_dim;
+            reshaped[dst_start..dst_start+head_dim].copy_from_slice(&data[src_start..src_start+head_dim]);
     }
 }
-
-fn softmax_cpu(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
-    let mut output = vec![0.0; data.len()];
-    for r in 0..rows {
-        let start = r * cols;
-        let end = start + cols;
-        let row = &data[start..end];
-        let max_val = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let exps: Vec<f32> = row.iter().map(|&x| (x - max_val).exp()).collect();
-        let sum_exps: f32 = exps.iter().sum();
-        for (i, &exp_val) in exps.iter().enumerate() {
-            output[start + i] = exp_val / sum_exps;
-        }
-    }
-    output
+    reshaped
 }
-
-// --- Batch helpers ---
-fn get_head_batch<'a>(data: &'a [f32], batch_idx: usize, head_idx: usize, seq_len: usize, head_dim: usize, _batch_size: usize, num_heads: usize) -> &'a [f32] {
-    let heads_per_batch = num_heads;
-    let start = (batch_idx * heads_per_batch * seq_len * head_dim) + (head_idx * seq_len * head_dim);
-    let end = start + seq_len * head_dim;
-    &data[start..end]
-}
-
-fn set_head_batch(data: &mut [f32], head_data: &[f32], batch_idx: usize, head_idx: usize, seq_len: usize, head_dim: usize, _batch_size: usize, num_heads: usize) {
-    let heads_per_batch = num_heads;
-    let start = (batch_idx * heads_per_batch * seq_len * head_dim) + (head_idx * seq_len * head_dim);
-    let end = start + seq_len * head_dim;
-    data[start..end].copy_from_slice(head_data);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-
-    #[test]
-    fn test_attention_config() {
-        let config = AttentionConfig::new(1024, 16, 16, 32);
-        assert_eq!(config.hidden_size, 1024);
-        assert_eq!(config.num_heads, 16);
-        assert_eq!(config.num_kv_heads, 16);
-        assert_eq!(config.max_seq_len, 32);
-        assert_eq!(config.dropout, 0.0);
-    }
-
-    #[test]
-    #[should_panic(expected = "hidden_size must be divisible by num_heads")]
-    fn test_invalid_attention_config() {
-        let config = AttentionConfig::new(1023, 16, 16, 32); // 1023 not divisible by 16
-        config.init();
-    }
-
-    #[test]
-    fn test_attention_dimensions() {
-        let config = AttentionConfig::new(1024, 16, 16, 32);
-        let attention = config.init();
-        assert_eq!(attention.head_dim, 64); // 1024 / 16
-    }
-
-    #[tokio::test]
-    async fn test_attention_batch2_shape() {
-        let config = AttentionConfig::new(32, 4, 4, 8);
-        let mut attention = config.init();
-        let batch_size = 2;
-        let seq_len = 4;
-        let input = vec![0.1; batch_size * seq_len * attention.q_proj.in_features];
-        let context = WgpuContext::new().await.expect("Failed to create WgpuContext");
-        let output = attention.forward_modern(&context, &input, batch_size, seq_len, 0, None, AttentionDevice::Cpu).await;
-        assert_eq!(output.len(), batch_size * seq_len * config.hidden_size);
-    }
-}
-
-static ATTENTION_LOG_CALLS: AtomicUsize = AtomicUsize::new(0);

@@ -31,7 +31,12 @@ fn do_full_model_serialization() {
     // Create dummy model
     let embedding = EmbeddingRecord { weight: vec![1.0, 2.0, 3.0, 4.0], shape: vec![2, 2] };
     let norm = RmsNormRecord { weight: vec![0.1, 0.2], shape: vec![2] };
-    let lm_head = EmbeddingRecord { weight: vec![5.0, 6.0, 7.0, 8.0], shape: vec![2, 2] };
+    let lm_head = BitLinearRecord {
+        packed_weights: vec![5, 6, 7, 8],
+        weight_scales: vec![1.0, 1.0],
+        in_features: 2,
+        out_features: 2,
+    };
     let block = TransformerBlockRecord {
         attention: AttentionRecord {
             wqkv: BitLinearRecord {
@@ -90,7 +95,7 @@ fn do_full_model_serialization() {
     // Check equality (basic fields)
     assert_eq!(loaded.embedding.weight, vec![1.0, 2.0, 3.0, 4.0]);
     assert_eq!(loaded.blocks[0].attention.wqkv.packed_weights, vec![123, 456]);
-    assert_eq!(loaded.lm_head.weight, vec![5.0, 6.0, 7.0, 8.0]);
+    assert_eq!(loaded.lm_head.packed_weights, vec![5, 6, 7, 8]);
     TEST_REPORTER.log_message(1, "Full model serialization/deserialization works.");
     let duration = t0.elapsed();
     TEST_REPORTER.record_timing("test_full_model_serialization", duration);

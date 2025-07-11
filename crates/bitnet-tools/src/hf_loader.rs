@@ -11,6 +11,7 @@ use std::fs::File;
 use std::io::{self, Read};
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_LENGTH;
+use tokio::task;
 
 pub use crate::constants::DEFAULT_MODEL_ID;
 
@@ -45,7 +46,7 @@ pub fn download_model_and_tokenizer_with_progress(
     model_id: &str,
     revision: Option<&str>,
     destination: impl AsRef<Path>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let api = Api::new()?;
     let repo = match revision {
         Some(rev) => api.repo(Repo::with_revision(model_id.to_string(), RepoType::Model, rev.to_string())),
@@ -135,6 +136,26 @@ pub fn download_model_and_tokenizer_with_progress(
     Ok(())
 }
 
+/// Downloads the model and tokenizer from Hugging Face with progress reporting.
+pub async fn download_model_and_tokenizer_with_progress_async(
+    model_id: &str,
+    revision: Option<&str>,
+    destination: impl AsRef<Path> + Send + 'static,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let model_id = model_id.to_string();
+    let revision = revision.map(|s| s.to_string());
+    let dest_path = destination.as_ref().to_path_buf();
+    task::spawn_blocking(move || {
+        download_model_and_tokenizer_with_progress(
+            &model_id,
+            revision.as_deref(),
+            dest_path,
+        )
+    })
+    .await
+    .unwrap()
+}
+
 /// Finds all safetensors files in the given directory.
 pub fn find_safetensors_files(dir: &Path) -> Vec<PathBuf> {
     std::fs::read_dir(dir)
@@ -148,7 +169,7 @@ pub fn find_safetensors_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Gets model files using the provided base directory and optional model ID.
-pub fn get_model_with_base(base_dir: &Path, model_id: Option<&str>) -> Result<ModelFiles, Box<dyn std::error::Error>> {
+pub fn get_model_with_base(base_dir: &Path, model_id: Option<&str>) -> Result<ModelFiles, Box<dyn std::error::Error + Send + Sync>> {
     let id = model_id.unwrap_or(DEFAULT_MODEL_ID);
     let dir = original_model_dir(base_dir, id);
     std::fs::create_dir_all(&dir)?;
@@ -209,7 +230,7 @@ pub fn get_model_with_base(base_dir: &Path, model_id: Option<&str>) -> Result<Mo
 }
 
 /// Gets model files using the default base directory and optional model ID.
-pub fn get_model(model_id: Option<&str>) -> Result<ModelFiles, Box<dyn std::error::Error>> {
+pub fn get_model(model_id: Option<&str>) -> Result<ModelFiles, Box<dyn std::error::Error + Send + Sync>> {
     get_model_with_base(models_root().as_path(), model_id)
 }
 
@@ -264,7 +285,7 @@ mod tests {
         assert!(config_path.exists(), "Config file does not exist");
         // At least one .safetensors file must exist
         assert!(safetensors_path.exists(), ".safetensors file does not exist");
-        let result = get_model_with_base(base_dir, Some(model_id));
+        let result: Result<_, Box<dyn std::error::Error + Send + Sync>> = get_model_with_base(base_dir, Some(model_id));
         assert!(result.is_ok(), "get_model_with_base failed: {:?}", result.err());
         let files = result.unwrap();
         assert_eq!(files.model_dir, orig_dir);

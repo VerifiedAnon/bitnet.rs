@@ -5,12 +5,18 @@ mod generation;
 mod sampler;
 pub mod gui;
 
-use rayon::ThreadPoolBuilder;
-use num_cpus;
+use eframe::egui;
+use crate::gui::app::ChatApp;
 
-fn main() {
-    ThreadPoolBuilder::new().num_threads(num_cpus::get()).build_global().unwrap();
-    println!("[BitNet] [CPU] Rayon thread pool size: {}", rayon::current_num_threads());
-    // TODO: Parse CLI args and launch CLI or GUI mode.
-    println!("bitnet-app: CLI/GUI demo (stub)");
+fn main() -> eframe::Result<()> {
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([400.0, 600.0]),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "BitNet Chat",
+        options,
+        Box::new(|_cc| Ok(Box::new(ChatApp::default()))),
+    )
 }

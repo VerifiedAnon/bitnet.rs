@@ -38,7 +38,7 @@ pub mod visualization;
 #[cfg_attr(docsrs, doc(cfg(feature = "training")))]
 pub mod training;
 
-pub use pipeline::{Pipeline, PipelineOptions, PipelineResult, PipelineError};
+pub use pipeline::{Pipeline, PipelineOptions, PipelineError};
 
 #[cfg(test)]
 mod tests {

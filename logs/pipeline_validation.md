@@ -1,19 +1,19 @@
 # PIPELINE_VALIDATION Test Report
 
-> Generated on: 2025-07-01 17:14:15
+> Generated on: 2025-07-08 13:02:45
 
 ## Test Results
 
 | No. | Test Name | Status | Time Taken | Error Message |
 |:---:|:----------|:------:|:----------:|:-------------|
-|  1 | Pipeline Creation                                  | ✅ Pass |    0.00 ms |             |
+|  1 | CPU Singlefile Creation Cold                       | ❌ Fail |   52.00 ms | Cannot drop a runtime in a context where blocki... |
 
 <details>
 <summary>📝 View Full Log Dump</summary>
 
 ```
-[2025-07-01, 17:14:15.382] -> [MEMORY] Used system memory before pipeline: 27935965184 KB
-[2025-07-01, 17:14:15.383] -> Pipeline::new succeeded
+[2025-07-08, 13:02:45.562] -> test_cpu_singlefile_creation_cold panicked: Cannot drop a runtime in a context where blocking is not allowed. This happens when a runtime is dropped from within an asynchronous context.
+[2025-07-08, 13:02:45.506] -> STARTING PIPELINE VALIDATION SUITE
 ```
 
 </details>
@@ -24,17 +24,17 @@
 ### Test Statistics
 
 - **Total Tests:** 1
-- **Passed:** 1
-- **Failed:** 0
+- **Passed:** 0
+- **Failed:** 1
 
 ### Timing Information
 
-- **Total Time:** 0.00 sec
-- **Average Time:** 0.00 ms
+- **Total Time:** 0.05 sec
+- **Average Time:** 52.00 ms
 
 ### Status
 
-✅ All tests passed successfully!
+❌ 1 test(s) failed. See above for details.
 
 ---
 

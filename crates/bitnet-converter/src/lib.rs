@@ -71,33 +71,32 @@ pub fn convert_model_on_disk(input_dir: &str, output_dir: &str, write_streamable
     let t2 = Instant::now();
     let record = packer::convert_model(tensor_map, config.num_hidden_layers, true)?;
     println!("[CONVERT] Packed weights in {:.2?}", t2.elapsed());
-    println!("[CONVERT] Writing model as per-block files to: {}", output_path.display());
+    println!("[CONVERT] Writing model output to: {}", output_path.display());
     let t3 = Instant::now();
-    // Save embedding
-    let embedding_path = output_path.join("embedding.bin");
-    if let Some(parent) = embedding_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let embedding_bytes = encode_to_vec(&record.embedding, standard())?;
-    std::fs::write(&embedding_path, &embedding_bytes)?;
-    // Save norm
-    let norm_path = output_path.join("norm.bin");
-    if let Some(parent) = norm_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let norm_bytes = encode_to_vec(&record.norm, standard())?;
-    std::fs::write(&norm_path, &norm_bytes)?;
-    // Save lm_head
-    let lm_head_path = output_path.join("lm_head.bin");
-    if let Some(parent) = lm_head_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let lm_head_bytes = encode_to_vec(&record.lm_head, standard())?;
-    std::fs::write(&lm_head_path, &lm_head_bytes)?;
-    // --- Always write single-file model as safetensors ---
-    write_single_file_model_safetensors(&record, &output_path)?;
-    // --- Optionally write per-block streaming output ---
+    // --- Write only the requested output format ---
     if write_streamable {
+        // Save embedding
+        let embedding_path = output_path.join("embedding.bin");
+        if let Some(parent) = embedding_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let embedding_bytes = encode_to_vec(&record.embedding, standard())?;
+        std::fs::write(&embedding_path, &embedding_bytes)?;
+        // Save norm
+        let norm_path = output_path.join("norm.bin");
+        if let Some(parent) = norm_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let norm_bytes = encode_to_vec(&record.norm, standard())?;
+        std::fs::write(&norm_path, &norm_bytes)?;
+        // Save lm_head
+        let lm_head_path = output_path.join("lm_head.bin");
+        if let Some(parent) = lm_head_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let lm_head_bytes = encode_to_vec(&record.lm_head, standard())?;
+        std::fs::write(&lm_head_path, &lm_head_bytes)?;
+        // Save blocks
         record.blocks.par_iter().enumerate().for_each(|(i, block)| {
             let block_path = output_path.join(format!("block_{}.bin", i));
             if let Some(parent) = block_path.parent() {
@@ -107,18 +106,21 @@ pub fn convert_model_on_disk(input_dir: &str, output_dir: &str, write_streamable
             std::fs::write(&block_path, &block_bytes).expect("Failed to write block file");
         });
         println!("[CONVERT] Wrote all model parts in {:.2?}", t3.elapsed());
+    } else {
+        // Write only the single-file safetensors
+        write_single_file_model_safetensors(&record, &output_path)?;
     }
-    // --- Write a future-proof config for the packed model ---
+    // --- Write config for the chosen format ---
     let orig_config_path = input_path.join(CONFIG_JSON);
-    let packed_config_path = output_path.join("bitnet_packed_config.json");
     let mut packed_config: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&orig_config_path)?)?;
     packed_config["bitnet_packed"] = serde_json::Value::Bool(true);
     packed_config["_note"] = serde_json::Value::String("All packed tensor shapes are as per BitNet's quantization. QKV: [3*hidden_size, hidden_size/16], etc. Use this config for inference with the packed model.".to_string());
-    // --- Robust fix: always set hidden_size and vocab_size to match packed model ---
     packed_config["hidden_size"] = serde_json::Value::from(record.embedding.shape[1]);
     packed_config["vocab_size"] = serde_json::Value::from(record.embedding.shape[0]);
-    std::fs::write(&packed_config_path, serde_json::to_string_pretty(&packed_config)?)?;
-    println!("[CONVERT] Wrote packed model config to: {}", packed_config_path.display());
+    let config_json_path = output_path.join("config.json");
+    let packed_config_str = serde_json::to_string_pretty(&packed_config)?;
+    std::fs::write(&config_json_path, &packed_config_str)?;
+    println!("[CONVERT] Wrote packed model config to: {}", config_json_path.display());
     println!("[CONVERT] Total conversion time: {:.2?}", start.elapsed());
     Ok(output_path)
 } 

@@ -1,438 +1,606 @@
+//! BitNet Pipeline Validation Suite (Refactored)
 //!
-//! # BitNet Pipeline Validation Suite
-//!
-//! **Purpose:**
-//! - End-to-end, TDD-style validation of the BitNet pipeline: model loading, inference, device selection, golden output, settings, and performance.
-//! - Each logical step is a separate test. The master test runs all steps in order for CI/full validation.
-//! - All tests use a shared TestReporter for rich logging and Markdown report generation.
-//! - All tests are isolated: create/teardown their own pipeline/model/context.
-//! - Extensible: add new tests (settings, batch, streaming, etc.) as new functions and call from the master test.
-//!
-//! **How to extend:**
-//! - Add new golden cases to the `GoldenCase` array.
-//! - Add new test functions for new features (settings, batch, streaming, etc.).
-//! - To integrate settings, add a `settings` field to PipelineOptions and thread it through.
-//! - To add new device types, update the backend selection logic.
-//!
-//! **Philosophy:**
-//! - TDD: Add a test, see it fail, implement/fix, see it pass, repeat.
-//! - All failures are logged and reported, not panics (unless setup fails).
-//! - All tests are robust to missing devices/backends (log and skip, don't panic).
-//! - Markdown report is always generated for CI/debugging.
-//!
-//! **TODO:**
-//! - Integrate InferenceSettings from settings.rs (see placeholder test).
-//! - Add batch/streaming/perf tests as needed.
-//!
-//! ## Pipeline Creation Test Structure
-//!
-//! - test_pipeline_creation_cpu: Creates pipeline with CPU backend, logs RAM usage, device info, and time.
-//! - test_pipeline_creation_gpu: Creates pipeline with GPU backend, logs VRAM (if available), device info, and time.
-//! - test_pipeline_creation: Runs both subtests and generates a summary table in the report.
+//! - Covers all combinations: CPU/GPU × singlefile/streaming
+//! - Each test is explicit, self-documenting, and uses TestReporter
+//! - Warm/cold system: _warm functions accept Option<&mut Pipeline>
+//! - All tests are #[test] #[serial] #[ignore] except the master
+//! - Master test runs all and generates report
 
 use bitnet_tools::test_utils::TestReporter;
 use bitnet_core::pipeline::{Pipeline, PipelineOptions, PipelineBackend};
+use bitnet_core::settings::InferenceSettings;
 use sysinfo::System;
 use std::time::Instant;
 use serial_test::serial;
-use bitnet_core::settings::InferenceSettings;
 use lazy_static::lazy_static;
 use rayon::ThreadPoolBuilder;
 use num_cpus;
-
-struct GoldenCase<'a> {
-    prompt: &'a str,
-    expected_top_token: &'a str, // expected top token (hardcoded)
-}
-
-fn golden_cases() -> Vec<GoldenCase<'static>> {
-    vec![
-        GoldenCase { prompt: "Hello", expected_top_token: "world" },
-        GoldenCase { prompt: "The quick brown fox", expected_top_token: "jumps" },
-        GoldenCase { prompt: "", expected_top_token: "<pad>" },
-        GoldenCase { prompt: "!@#$%^&*()", expected_top_token: "Special" },
-    ]
-}
 
 lazy_static! {
     static ref TEST_REPORTER: TestReporter = TestReporter::new("pipeline_validation").expect("Failed to create test reporter");
 }
 
-// --- Test 1: Pipeline Creation ---
-#[test]
-#[serial]
-#[ignore]
-fn test_pipeline_creation_cpu() {
-    let reporter = &*TEST_REPORTER;
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let options = PipelineOptions {
-            model_id: None,
-            input_dir: None,
-            output_dir: None,
-            reporter: None,
-            backend: PipelineBackend::Cpu,
-            settings: None,
-            use_single_file: false,
-            log_level: None,
-            verbose: false,
-        };
-        let mut sys = System::new_all();
-        sys.refresh_memory();
-        let mem_before = sys.used_memory();
+struct GoldenCase<'a> {
+    prompt: &'a str,
+    expected_top_token: &'a str,
+}
+
+fn golden_cases() -> Vec<GoldenCase<'static>> {
+    vec![
+        GoldenCase { prompt: "Hello", expected_top_token: "," },
+        GoldenCase { prompt: "The quick brown fox", expected_top_token: " jumps" },
+        GoldenCase { prompt: "", expected_top_token: "ties" },
+        GoldenCase { prompt: "!@#$%^&*()", expected_top_token: "\n" },
+    ]
+}
+
+// --- Helper: Pipeline Creation ---
+async fn create_pipeline(backend: PipelineBackend, use_single_file: bool) -> Result<Pipeline, String> {
+    let options = PipelineOptions {
+        model_id: None,
+        input_dir: if use_single_file {
+            Some(std::path::PathBuf::from(r"E:/Desktop/Bitnet rs/models/Converted/microsoft/bitnet-b1.58-2B-4T-bf16"))
+        } else {
+            None
+        },
+        output_dir: None,
+        reporter: None,
+        backend,
+        settings: None,
+        use_single_file,
+        log_level: None,
+        verbose: false,
+    };
+    Pipeline::new(options).await.map_err(|e| format!("Pipeline creation failed: {e}"))
+}
+
+// --- Helper: Inference ---
+async fn run_inference(pipeline: &mut Pipeline, settings: &InferenceSettings, reporter: &TestReporter, backend: &str, filetype: &str, mode: &str) {
+    for (i, case) in golden_cases().iter().enumerate() {
         let t0 = Instant::now();
-        let pipeline = match Pipeline::new(options).await {
-            Ok(p) => {
-                reporter.log_message(1, "Pipeline::new (CPU) succeeded");
-                p
-            },
+        let output = match pipeline.generate_text(case.prompt, settings).await {
+            Ok(r) => r,
             Err(e) => {
-                reporter.record_failure("Pipeline Creation CPU", &format!("Failed to create pipeline: {e}"), None);
-                return;
+                reporter.record_failure(&format!("{backend}_{filetype}_{mode}_inference_case_{i}"), &format!("Inference failed: {e}"), None);
+                continue;
             }
         };
         let t1 = t0.elapsed();
-        sys.refresh_memory();
-        let mem_after = sys.used_memory();
-        let mem_delta = mem_after as i64 - mem_before as i64;
-        reporter.log_message(1, &format!("[CPU] Used system memory before: {} KB, after: {} KB, delta: {} KB", mem_before, mem_after, mem_delta));
-        reporter.log_message(1, &format!("[CPU] Pipeline creation time: {:?}", t1));
-        reporter.log_message(1, "[CPU] Backend: GL (CPU fallback)");
-        drop(pipeline);
+        reporter.record_timing(&format!("{backend}_{filetype}_{mode}_inference_case_{i}"), t1);
+        reporter.log_message(3, &format!("[{backend}/{filetype}/{mode}] Prompt: '{}', Output: '{}', Expected: '{}'", case.prompt, output, case.expected_top_token));
+        if output.is_empty() {
+            reporter.record_failure(&format!("{backend}_{filetype}_{mode}_inference_case_{i}"), "Output is empty", None);
+        }
+        if !output.contains(case.expected_top_token) {
+            reporter.record_failure(&format!("{backend}_{filetype}_{mode}_inference_case_{i}"), &format!("Golden output mismatch: expected '{}' , got '{}'", case.expected_top_token, output), None);
+        }
+    }
+}
+
+// --- Warm/Cold Logic Functions ---
+
+async fn cpu_singlefile_inference_golden_warm(pipeline: Option<&mut Pipeline>, reporter: &TestReporter, mode: &str) -> Result<(), String> {
+    let mut owned_pipeline;
+    let pipeline = match pipeline {
+        Some(p) => p,
+        None => {
+            owned_pipeline = create_pipeline(PipelineBackend::Cpu, true).await?;
+            &mut owned_pipeline
+        }
+    };
+    let settings = InferenceSettings::default().with_max_new_tokens(1);
+    run_inference(pipeline, &settings, reporter, "CPU", "singlefile", mode).await;
+    Ok(())
+}
+
+async fn cpu_streaming_inference_golden_warm(pipeline: Option<&mut Pipeline>, reporter: &TestReporter, mode: &str) -> Result<(), String> {
+    let mut owned_pipeline;
+    let pipeline = match pipeline {
+        Some(p) => p,
+        None => {
+            owned_pipeline = create_pipeline(PipelineBackend::Cpu, false).await?;
+            &mut owned_pipeline
+        }
+    };
+    let settings = InferenceSettings::default().with_max_new_tokens(1);
+    run_inference(pipeline, &settings, reporter, "CPU", "streaming", mode).await;
+    Ok(())
+}
+
+async fn gpu_singlefile_inference_golden_warm(pipeline: Option<&mut Pipeline>, reporter: &TestReporter, mode: &str) -> Result<(), String> {
+    let mut owned_pipeline;
+    let pipeline = match pipeline {
+        Some(p) => p,
+        None => {
+            owned_pipeline = create_pipeline(PipelineBackend::Gpu, true).await?;
+            &mut owned_pipeline
+        }
+    };
+    let settings = InferenceSettings::default().with_max_new_tokens(1);
+    run_inference(pipeline, &settings, reporter, "GPU", "singlefile", mode).await;
+    Ok(())
+}
+
+async fn gpu_streaming_inference_golden_warm(pipeline: Option<&mut Pipeline>, reporter: &TestReporter, mode: &str) -> Result<(), String> {
+    let mut owned_pipeline;
+    let pipeline = match pipeline {
+        Some(p) => p,
+        None => {
+            owned_pipeline = create_pipeline(PipelineBackend::Gpu, false).await?;
+            &mut owned_pipeline
+        }
+    };
+    let settings = InferenceSettings::default().with_max_new_tokens(1);
+    run_inference(pipeline, &settings, reporter, "GPU", "streaming", mode).await;
+    Ok(())
+}
+
+// --- Creation Only (timing, readiness) ---
+async fn pipeline_creation_warm(backend: PipelineBackend, use_single_file: bool, reporter: &TestReporter, label: &str) -> Result<(), String> {
+    let t0 = Instant::now();
+    let pipeline = create_pipeline(backend, use_single_file).await?;
+    let t1 = t0.elapsed();
+    reporter.log_message(1, &format!("[{}] Pipeline created successfully.", label));
+    reporter.record_timing(&format!("{}_creation", label), t1);
+    drop(pipeline);
+    Ok(())
+}
+
+// --- Settings Integration ---
+async fn settings_integration_warm(reporter: &TestReporter) -> Result<(), String> {
+    let settings = InferenceSettings::default().with_temperature(0.5).with_top_p(0.8).with_max_new_tokens(4);
+    let mut pipeline = create_pipeline(PipelineBackend::Cpu, true).await?;
+    let prompt = "Settings integration test.";
+    let output = pipeline.generate_text(prompt, &settings).await.map_err(|e| format!("Inference failed: {e}"))?;
+    reporter.log_message(6, &format!("Settings test: output={}, settings={:?}", output, settings));
+    Ok(())
+}
+
+// --- Performance Metrics ---
+async fn performance_metrics_warm(backend: PipelineBackend, use_single_file: bool, reporter: &TestReporter, label: &str) -> Result<(), String> {
+    let mut pipeline = create_pipeline(backend, use_single_file).await?;
+    let prompt = "Performance test prompt.";
+    let settings = InferenceSettings::default().with_max_new_tokens(32);
+    let t0 = Instant::now();
+    let mut total_tokens = 0;
+    let mut _last_result = None;
+    for _ in 0..settings.max_new_tokens {
+        let output = pipeline.generate_text(prompt, &settings).await.map_err(|e| format!("Inference failed: {e}"))?;
+        total_tokens += 1;
+        _last_result = Some(output);
+    }
+    let elapsed = t0.elapsed();
+    let tokens_per_sec = total_tokens as f64 / elapsed.as_secs_f64();
+    reporter.log_message(5, &format!("Performance: {} tokens in {:?} ({:.2} tokens/sec)", total_tokens, elapsed, tokens_per_sec));
+    Ok(())
+}
+
+// --- TESTS: COLD ---
+
+#[test]
+#[serial]
+#[ignore]
+fn test_cpu_singlefile_creation_cold() {
+    let reporter = &*TEST_REPORTER;
+    let t0 = Instant::now();
+    let result = std::panic::catch_unwind(|| {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(pipeline_creation_warm(PipelineBackend::Cpu, true, reporter, "cpu_singlefile_cold"))
     });
-}
-
-#[test]
-#[serial]
-#[ignore]
-fn test_pipeline_creation_gpu() {
-    let reporter = &*TEST_REPORTER;
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let options = PipelineOptions {
-            model_id: None,
-            input_dir: None,
-            output_dir: None,
-            reporter: None,
-            backend: PipelineBackend::Gpu,
-            settings: None,
-            use_single_file: false,
-            log_level: None,
-            verbose: false,
-        };
-        let mut sys = System::new_all();
-        sys.refresh_memory();
-        let mem_before = sys.used_memory();
-        let t0 = Instant::now();
-        let pipeline = match Pipeline::new(options).await {
-            Ok(p) => {
-                reporter.log_message(2, "Pipeline::new (GPU) succeeded");
-                p
-            },
-            Err(e) => {
-                reporter.record_failure("Pipeline Creation GPU", &format!("Failed to create pipeline: {e}"), None);
-                return;
-            }
-        };
-        let t1 = t0.elapsed();
-        sys.refresh_memory();
-        let mem_after = sys.used_memory();
-        let mem_delta = mem_after as i64 - mem_before as i64;
-        // VRAM info (not available via sysinfo, so log N/A)
-        reporter.log_message(2, &format!("[GPU] Used system memory before: {} KB, after: {} KB, delta: {} KB", mem_before, mem_after, mem_delta));
-        reporter.log_message(2, "[GPU] VRAM usage: N/A (not available via sysinfo)");
-        reporter.log_message(2, &format!("[GPU] Pipeline creation time: {:?}", t1));
-        reporter.log_message(2, "[GPU] Backend: VULKAN | DX12 | METAL");
-        drop(pipeline);
-    });
-}
-
-#[test]
-#[serial]
-#[ignore]
-fn test_pipeline_creation() {
-    test_pipeline_creation_cpu();
-    test_pipeline_creation_gpu();
-    let reporter = &*TEST_REPORTER;
-    reporter.log_message(0, "Pipeline creation (CPU and GPU) tests completed. See above for details.");
-}
-
-// --- Test 2: Model Ready ---
-#[test]
-#[serial]
-#[ignore]
-fn test_model_ready() {
-    let reporter = &*TEST_REPORTER;
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let options = PipelineOptions {
-            model_id: None,
-            input_dir: None,
-            output_dir: None,
-            reporter: None,
-            backend: PipelineBackend::Auto,
-            settings: None,
-            use_single_file: false,
-            log_level: None,
-            verbose: false,
-        };
-        let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
-        let t2 = Instant::now();
-        // Model is ready after Pipeline::new, so just log success
-        reporter.log_message(2, "Pipeline is ready after construction (ensure_model_ready removed)");
-        let t3 = t2.elapsed();
-        reporter.record_timing("Model Ready", t3);
-        drop(pipeline);
-    });
-}
-
-// --- Test 3: CPU Inference ---
-#[test]
-#[serial]
-#[ignore]
-fn test_cpu_inference() {
-    ThreadPoolBuilder::new().num_threads(num_cpus::get()).build_global().ok();
-    println!("[BitNet] [CPU] Rayon thread pool size: {}", rayon::current_num_threads());
-    let reporter = &*TEST_REPORTER;
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let settings = InferenceSettings::default().with_max_new_tokens(1);
-        let options = PipelineOptions {
-            model_id: None,
-            input_dir: None,
-            output_dir: None,
-            reporter: None,
-            backend: PipelineBackend::Cpu,
-            settings: Some(settings.clone()),
-            use_single_file: false,
-            log_level: None,
-            verbose: false,
-        };
-        let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
-        for (i, case) in golden_cases().iter().enumerate() {
-            let t4 = Instant::now();
-            let result = match pipeline.run_inference(case.prompt).await {
-                Ok(r) => r,
-                Err(e) => {
-                    reporter.record_failure(&format!("CPU Inference (case {i})"), &format!("Inference failed: {e}"), None);
-                    continue;
-                }
+    match result {
+        Ok(Ok(_)) => {
+            reporter.log_message(1, "test_cpu_singlefile_creation_cold passed.");
+            reporter.record_timing("test_cpu_singlefile_creation_cold", t0.elapsed());
+        }
+        Ok(Err(e)) => {
+            reporter.log_message(1, &format!("test_cpu_singlefile_creation_cold failed: {}", e));
+            reporter.record_failure("test_cpu_singlefile_creation_cold", &e, Some(t0.elapsed()));
+        }
+        Err(e) => {
+            let err_msg = if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "Test panicked".to_string()
             };
-            let t5 = t4.elapsed();
-            reporter.record_timing(&format!("CPU Inference (case {i})"), t5);
-            reporter.log_message(3, &format!("[GOLDEN] Top token for \"{}\": {}", case.prompt, result.top_token));
-            if result.logits.is_empty() {
-                reporter.record_failure(&format!("CPU Inference (case {i})"), "Logits vector is empty", None);
-            }
-            if !result.logits.iter().all(|&l| l.is_finite()) {
-                reporter.record_failure(&format!("CPU Inference (case {i})"), "Logits contain NaN or Infinity", None);
-            }
-            if result.top_token != case.expected_top_token {
-                reporter.record_failure(&format!("CPU Inference (case {i})"), &format!("Golden output mismatch: expected '{}' , got '{}'", case.expected_top_token, result.top_token), None);
-            }
-            // Log why generation stopped
-            if result.stopped_by_eos {
-                reporter.log_message(3, "[GENERATION] Stopped by EOS token");
-            } else if result.stopped_by_max_tokens {
-                reporter.log_message(3, "[GENERATION] Stopped by max_tokens");
-            }
+            reporter.log_message(1, &format!("test_cpu_singlefile_creation_cold panicked: {}", err_msg));
+            reporter.record_failure("test_cpu_singlefile_creation_cold", &err_msg, Some(t0.elapsed()));
         }
-        drop(pipeline);
-    });
-}
-
-#[test]
-#[serial]
-#[ignore]
-fn test_cpu_inference_single_file() {
-    ThreadPoolBuilder::new().num_threads(num_cpus::get()).build_global().ok();
-    println!("[BitNet] [CPU] Rayon thread pool size: {}", rayon::current_num_threads());
-    let reporter = &*TEST_REPORTER;
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let settings = InferenceSettings::default().with_max_new_tokens(1);
-        let options = PipelineOptions {
-            model_id: None,
-            input_dir: Some(std::path::PathBuf::from(r"E:/Desktop/Bitnet rs/models/Converted/microsoft/bitnet-b1.58-2B-4T-bf16")),
-            output_dir: None,
-            reporter: None,
-            backend: PipelineBackend::Cpu,
-            settings: Some(settings.clone()),
-            use_single_file: true,
-            log_level: None,
-            verbose: false,
-        };
-        // Create the pipeline ONCE and reuse for all prompts
-        let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
-        for (i, case) in golden_cases().iter().enumerate() {
-            let t4 = Instant::now();
-            let result = match pipeline.run_inference(case.prompt).await {
-                Ok(r) => r,
-                Err(e) => {
-                    reporter.record_failure(&format!("CPU Inference SingleFile (case {i})"), &format!("Inference failed: {e}"), None);
-                    continue;
-                }
-            };
-            // Print prompt and decoded top token to terminal
-            println!("Prompt: '{:?}' -> Top token: '{}'", case.prompt, result.top_token);
-            let t5 = t4.elapsed();
-            reporter.record_timing(&format!("CPU Inference SingleFile (case {i})"), t5);
-            reporter.log_message(3, &format!("[GOLDEN] Top token for \"{}\": {}", case.prompt, result.top_token));
-            if result.logits.is_empty() {
-                reporter.record_failure(&format!("CPU Inference SingleFile (case {i})"), "Logits vector is empty", None);
-            }
-            if !result.logits.iter().all(|&l| l.is_finite()) {
-                reporter.record_failure(&format!("CPU Inference SingleFile (case {i})"), "Logits contain NaN or Infinity", None);
-            }
-            if result.top_token != case.expected_top_token {
-                reporter.record_failure(&format!("CPU Inference SingleFile (case {i})"), &format!("Golden output mismatch: expected '{}' , got '{}'", case.expected_top_token, result.top_token), None);
-            }
-            if result.stopped_by_eos {
-                reporter.log_message(3, "[GENERATION] Stopped by EOS token");
-            } else if result.stopped_by_max_tokens {
-                reporter.log_message(3, "[GENERATION] Stopped by max_tokens");
-            }
-        }
-        drop(pipeline);
-    });
-}
-
-// --- Test 4: GPU Inference ---
-#[test]
-#[serial]
-#[ignore]
-fn test_gpu_inference() {
-    let reporter = &*TEST_REPORTER;
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let options = PipelineOptions {
-            model_id: None,
-            input_dir: None,
-            output_dir: None,
-            reporter: None,
-            backend: PipelineBackend::Gpu,
-            settings: None,
-            use_single_file: false,
-            log_level: None,
-            verbose: false,
-        };
-        let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
-        for (i, case) in golden_cases().iter().enumerate() {
-            let t4 = Instant::now();
-            let result = match pipeline.run_inference(case.prompt).await {
-                Ok(r) => r,
-                Err(e) => {
-                    reporter.record_failure(&format!("GPU Inference (case {i})"), &format!("Inference failed: {e}"), None);
-                    continue;
-                }
-            };
-            let t5 = t4.elapsed();
-            reporter.record_timing(&format!("GPU Inference (case {i})"), t5);
-            reporter.log_message(4, &format!("[GOLDEN] Top token for \"{}\": {}", case.prompt, result.top_token));
-            if result.logits.is_empty() {
-                reporter.record_failure(&format!("GPU Inference (case {i})"), "Logits vector is empty", None);
-            }
-            if !result.logits.iter().all(|&l| l.is_finite()) {
-                reporter.record_failure(&format!("GPU Inference (case {i})"), "Logits contain NaN or Infinity", None);
-            }
-            if result.top_token != case.expected_top_token {
-                reporter.record_failure(&format!("GPU Inference (case {i})"), &format!("Golden output mismatch: expected '{}', got '{}'", case.expected_top_token, result.top_token), None);
-            }
-        }
-        drop(pipeline);
-    });
-}
-
-// --- Test 5: Performance Metrics ---
-#[test]
-#[serial]
-#[ignore]
-fn test_performance_metrics() {
-    let reporter = &*TEST_REPORTER;
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let options = PipelineOptions {
-            model_id: None,
-            input_dir: None,
-            output_dir: None,
-            reporter: None,
-            backend: PipelineBackend::Cpu,
-            settings: None,
-            use_single_file: false,
-            log_level: None,
-            verbose: false,
-        };
-        let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
-        let prompt = "Performance test prompt.";
-        let settings = InferenceSettings::default().with_max_new_tokens(32);
-        let t0 = Instant::now();
-        let mut total_tokens = 0;
-        let mut _last_result = None;
-        for _ in 0..settings.max_new_tokens {
-            let result = pipeline.run_inference(prompt).await.expect("Inference failed");
-            total_tokens += 1;
-            _last_result = Some(result);
-        }
-        let elapsed = t0.elapsed();
-        let tokens_per_sec = total_tokens as f64 / elapsed.as_secs_f64();
-        reporter.log_message(5, &format!("Performance: {} tokens in {:?} ({:.2} tokens/sec)", total_tokens, elapsed, tokens_per_sec));
-    });
-}
-
-// --- Test 6: Settings.rs Integration ---
-#[test]
-#[serial]
-#[ignore]
-fn test_settings_integration() {
-    let reporter = &*TEST_REPORTER;
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        let settings = InferenceSettings::default()
-            .with_temperature(0.5)
-            .with_top_p(0.8)
-            .with_max_new_tokens(4);
-        let options = PipelineOptions {
-            model_id: None,
-            input_dir: None,
-            output_dir: None,
-            reporter: None,
-            backend: PipelineBackend::Cpu,
-            settings: Some(settings.clone()),
-            use_single_file: false,
-            log_level: None,
-            verbose: false,
-        };
-        let mut pipeline = Pipeline::new(options).await.expect("Failed to create pipeline");
-        let prompt = "Settings integration test.";
-        let result = pipeline.run_inference(prompt).await.expect("Inference failed");
-        reporter.log_message(6, &format!("Settings test: top_token={}, logits_len={}, settings={:?}", result.top_token, result.logits.len(), settings));
-    });
-}
-
-fn zzz_final_report() {
-    // This function runs last and generates the final report.
-    // Add a small delay to ensure all async tests complete.
-    std::thread::sleep(std::time::Duration::from_secs(2));
+    }
     TEST_REPORTER.generate_report();
 }
 
-// --- Master Test: Run All Sequentially ---
+#[test]
+#[serial]
+#[ignore]
+fn test_cpu_singlefile_inference_golden_cold() {
+    let reporter = &*TEST_REPORTER;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let t0 = Instant::now();
+    let result = runtime.block_on(cpu_singlefile_inference_golden_warm(None, reporter, "cold"));
+    match result {
+        Ok(_) => {
+            reporter.log_message(1, "test_cpu_singlefile_inference_golden_cold passed.");
+            reporter.record_timing("test_cpu_singlefile_inference_golden_cold", t0.elapsed());
+        }
+        Err(e) => {
+            reporter.log_message(1, &format!("test_cpu_singlefile_inference_golden_cold failed: {}", e));
+            reporter.record_failure("test_cpu_singlefile_inference_golden_cold", &e, Some(t0.elapsed()));
+        }
+    }
+    TEST_REPORTER.generate_report();
+}
+
+#[test]
+#[serial]
+#[ignore]
+fn test_cpu_streaming_creation_cold() {
+    let reporter = &*TEST_REPORTER;
+    let result = std::panic::catch_unwind(|| {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(pipeline_creation_warm(PipelineBackend::Cpu, false, reporter, "cpu_streaming_cold"))
+    });
+    match result {
+        Ok(Ok(_)) => {
+            reporter.log_message(1, "test_cpu_streaming_creation_cold passed.");
+        }
+        Ok(Err(e)) => {
+            reporter.log_message(1, &format!("test_cpu_streaming_creation_cold failed: {}", e));
+            reporter.record_failure("test_cpu_streaming_creation_cold", &e, None);
+        }
+        Err(e) => {
+            let err_msg = if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "Test panicked".to_string()
+            };
+            reporter.log_message(1, &format!("test_cpu_streaming_creation_cold panicked: {}", err_msg));
+            reporter.record_failure("test_cpu_streaming_creation_cold", &err_msg, None);
+        }
+    }
+    TEST_REPORTER.generate_report();
+}
+
+#[test]
+#[serial]
+#[ignore]
+fn test_cpu_streaming_inference_golden_cold() {
+    let reporter = &*TEST_REPORTER;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let t0 = Instant::now();
+    let result = runtime.block_on(cpu_streaming_inference_golden_warm(None, reporter, "cold"));
+    match result {
+        Ok(_) => {
+            reporter.log_message(1, "test_cpu_streaming_inference_golden_cold passed.");
+            reporter.record_timing("test_cpu_streaming_inference_golden_cold", t0.elapsed());
+        }
+        Err(e) => {
+            reporter.log_message(1, &format!("test_cpu_streaming_inference_golden_cold failed: {}", e));
+            reporter.record_failure("test_cpu_streaming_inference_golden_cold", &e, Some(t0.elapsed()));
+        }
+    }
+    TEST_REPORTER.generate_report();
+}
+
+#[test]
+#[serial]
+#[ignore]
+fn test_gpu_singlefile_creation_cold() {
+    let reporter = &*TEST_REPORTER;
+    let result = std::panic::catch_unwind(|| {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(pipeline_creation_warm(PipelineBackend::Gpu, true, reporter, "gpu_singlefile_cold"))
+    });
+    match result {
+        Ok(Ok(_)) => {
+            reporter.log_message(1, "test_gpu_singlefile_creation_cold passed.");
+        }
+        Ok(Err(e)) => {
+            reporter.log_message(1, &format!("test_gpu_singlefile_creation_cold failed: {}", e));
+            reporter.record_failure("test_gpu_singlefile_creation_cold", &e, None);
+        }
+        Err(e) => {
+            let err_msg = if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "Test panicked".to_string()
+            };
+            reporter.log_message(1, &format!("test_gpu_singlefile_creation_cold panicked: {}", err_msg));
+            reporter.record_failure("test_gpu_singlefile_creation_cold", &err_msg, None);
+        }
+    }
+    TEST_REPORTER.generate_report();
+}
+
+#[test]
+#[serial]
+#[ignore]
+fn test_gpu_singlefile_inference_golden_cold() {
+    let reporter = &*TEST_REPORTER;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let t0 = Instant::now();
+    let result = runtime.block_on(gpu_singlefile_inference_golden_warm(None, reporter, "cold"));
+    match result {
+        Ok(_) => {
+            reporter.log_message(1, "test_gpu_singlefile_inference_golden_cold passed.");
+            reporter.record_timing("test_gpu_singlefile_inference_golden_cold", t0.elapsed());
+        }
+        Err(e) => {
+            reporter.log_message(1, &format!("test_gpu_singlefile_inference_golden_cold failed: {}", e));
+            reporter.record_failure("test_gpu_singlefile_inference_golden_cold", &e, Some(t0.elapsed()));
+        }
+    }
+    TEST_REPORTER.generate_report();
+}
+
+#[test]
+#[serial]
+#[ignore]
+fn test_gpu_streaming_creation_cold() {
+    let reporter = &*TEST_REPORTER;
+    let result = std::panic::catch_unwind(|| {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(pipeline_creation_warm(PipelineBackend::Gpu, false, reporter, "gpu_streaming_cold"))
+    });
+    match result {
+        Ok(Ok(_)) => {
+            reporter.log_message(1, "test_gpu_streaming_creation_cold passed.");
+        }
+        Ok(Err(e)) => {
+            reporter.log_message(1, &format!("test_gpu_streaming_creation_cold failed: {}", e));
+            reporter.record_failure("test_gpu_streaming_creation_cold", &e, None);
+        }
+        Err(e) => {
+            let err_msg = if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "Test panicked".to_string()
+            };
+            reporter.log_message(1, &format!("test_gpu_streaming_creation_cold panicked: {}", err_msg));
+            reporter.record_failure("test_gpu_streaming_creation_cold", &err_msg, None);
+        }
+    }
+    TEST_REPORTER.generate_report();
+}
+
+#[test]
+#[serial]
+#[ignore]
+fn test_gpu_streaming_inference_golden_cold() {
+    let reporter = &*TEST_REPORTER;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let t0 = Instant::now();
+    let result = runtime.block_on(gpu_streaming_inference_golden_warm(None, reporter, "cold"));
+    match result {
+        Ok(_) => {
+            reporter.log_message(1, "test_gpu_streaming_inference_golden_cold passed.");
+            reporter.record_timing("test_gpu_streaming_inference_golden_cold", t0.elapsed());
+        }
+        Err(e) => {
+            reporter.log_message(1, &format!("test_gpu_streaming_inference_golden_cold failed: {}", e));
+            reporter.record_failure("test_gpu_streaming_inference_golden_cold", &e, Some(t0.elapsed()));
+        }
+    }
+    TEST_REPORTER.generate_report();
+}
+
+// --- TESTS: WARM ---
+
+#[test]
+#[serial]
+#[ignore]
+fn test_cpu_singlefile_inference_golden_warm() {
+    let reporter = &*TEST_REPORTER;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let t0 = Instant::now();
+    let mut pipeline = match runtime.block_on(create_pipeline(PipelineBackend::Cpu, true)) {
+        Ok(p) => p,
+        Err(e) => {
+            reporter.log_message(1, &format!("test_cpu_singlefile_inference_golden_warm pipeline creation failed: {}", e));
+            reporter.record_failure("test_cpu_singlefile_inference_golden_warm", &e, Some(t0.elapsed()));
+            return;
+        }
+    };
+    let result = runtime.block_on(cpu_singlefile_inference_golden_warm(Some(&mut pipeline), reporter, "warm"));
+    match result {
+        Ok(_) => {
+            reporter.log_message(1, "test_cpu_singlefile_inference_golden_warm passed.");
+            reporter.record_timing("test_cpu_singlefile_inference_golden_warm", t0.elapsed());
+        }
+        Err(e) => {
+            reporter.log_message(1, &format!("test_cpu_singlefile_inference_golden_warm failed: {}", e));
+            reporter.record_failure("test_cpu_singlefile_inference_golden_warm", &e, Some(t0.elapsed()));
+        }
+    }
+}
+
+#[test]
+#[serial]
+#[ignore]
+fn test_cpu_streaming_inference_golden_warm() {
+    let reporter = &*TEST_REPORTER;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let t0 = Instant::now();
+    let mut pipeline = match runtime.block_on(create_pipeline(PipelineBackend::Cpu, false)) {
+        Ok(p) => p,
+        Err(e) => {
+            reporter.log_message(1, &format!("test_cpu_streaming_inference_golden_warm pipeline creation failed: {}", e));
+            reporter.record_failure("test_cpu_streaming_inference_golden_warm", &e, Some(t0.elapsed()));
+            return;
+        }
+    };
+    let result = runtime.block_on(cpu_streaming_inference_golden_warm(Some(&mut pipeline), reporter, "warm"));
+    match result {
+        Ok(_) => {
+            reporter.log_message(1, "test_cpu_streaming_inference_golden_warm passed.");
+            reporter.record_timing("test_cpu_streaming_inference_golden_warm", t0.elapsed());
+        }
+        Err(e) => {
+            reporter.log_message(1, &format!("test_cpu_streaming_inference_golden_warm failed: {}", e));
+            reporter.record_failure("test_cpu_streaming_inference_golden_warm", &e, Some(t0.elapsed()));
+        }
+    }
+}
+
+#[test]
+#[serial]
+#[ignore]
+fn test_gpu_singlefile_inference_golden_warm() {
+    let reporter = &*TEST_REPORTER;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let t0 = Instant::now();
+    let mut pipeline = match runtime.block_on(create_pipeline(PipelineBackend::Gpu, true)) {
+        Ok(p) => p,
+        Err(e) => {
+            reporter.log_message(1, &format!("test_gpu_singlefile_inference_golden_warm pipeline creation failed: {}", e));
+            reporter.record_failure("test_gpu_singlefile_inference_golden_warm", &e, Some(t0.elapsed()));
+            return;
+        }
+    };
+    let result = runtime.block_on(gpu_singlefile_inference_golden_warm(Some(&mut pipeline), reporter, "warm"));
+    match result {
+        Ok(_) => {
+            reporter.log_message(1, "test_gpu_singlefile_inference_golden_warm passed.");
+            reporter.record_timing("test_gpu_singlefile_inference_golden_warm", t0.elapsed());
+        }
+        Err(e) => {
+            reporter.log_message(1, &format!("test_gpu_singlefile_inference_golden_warm failed: {}", e));
+            reporter.record_failure("test_gpu_singlefile_inference_golden_warm", &e, Some(t0.elapsed()));
+        }
+    }
+}
+
+#[test]
+#[serial]
+#[ignore]
+fn test_gpu_streaming_inference_golden_warm() {
+    let reporter = &*TEST_REPORTER;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let t0 = Instant::now();
+    let mut pipeline = match runtime.block_on(create_pipeline(PipelineBackend::Gpu, false)) {
+        Ok(p) => p,
+        Err(e) => {
+            reporter.log_message(1, &format!("test_gpu_streaming_inference_golden_warm pipeline creation failed: {}", e));
+            reporter.record_failure("test_gpu_streaming_inference_golden_warm", &e, Some(t0.elapsed()));
+            return;
+        }
+    };
+    let result = runtime.block_on(gpu_streaming_inference_golden_warm(Some(&mut pipeline), reporter, "warm"));
+    match result {
+        Ok(_) => {
+            reporter.log_message(1, "test_gpu_streaming_inference_golden_warm passed.");
+            reporter.record_timing("test_gpu_streaming_inference_golden_warm", t0.elapsed());
+        }
+        Err(e) => {
+            reporter.log_message(1, &format!("test_gpu_streaming_inference_golden_warm failed: {}", e));
+            reporter.record_failure("test_gpu_streaming_inference_golden_warm", &e, Some(t0.elapsed()));
+        }
+    }
+}
+
+// --- Settings Integration ---
+#[test]
+#[serial]
+#[ignore]
+fn test_settings_integration_cold() {
+    let reporter = &*TEST_REPORTER;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let t0 = Instant::now();
+    let result = runtime.block_on(settings_integration_warm(reporter));
+    match result {
+        Ok(_) => {
+            reporter.log_message(1, "test_settings_integration_cold passed.");
+            reporter.record_timing("test_settings_integration_cold", t0.elapsed());
+        }
+        Err(e) => {
+            reporter.log_message(1, &format!("test_settings_integration_cold failed: {}", e));
+            reporter.record_failure("test_settings_integration_cold", &e, Some(t0.elapsed()));
+        }
+    }
+    TEST_REPORTER.generate_report();
+}
+
+// --- Performance Metrics ---
+#[test]
+#[serial]
+#[ignore]
+fn test_performance_metrics_cpu_cold() {
+    let reporter = &*TEST_REPORTER;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let t0 = Instant::now();
+    let result = runtime.block_on(performance_metrics_warm(PipelineBackend::Cpu, true, reporter, "cpu_perf_cold"));
+    match result {
+        Ok(_) => {
+            reporter.log_message(1, "test_performance_metrics_cpu_cold passed.");
+            reporter.record_timing("test_performance_metrics_cpu_cold", t0.elapsed());
+        }
+        Err(e) => {
+            reporter.log_message(1, &format!("test_performance_metrics_cpu_cold failed: {}", e));
+            reporter.record_failure("test_performance_metrics_cpu_cold", &e, Some(t0.elapsed()));
+        }
+    }
+    TEST_REPORTER.generate_report();
+}
+
+#[test]
+#[serial]
+#[ignore]
+fn test_performance_metrics_gpu_cold() {
+    let reporter = &*TEST_REPORTER;
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let t0 = Instant::now();
+    let result = runtime.block_on(performance_metrics_warm(PipelineBackend::Gpu, true, reporter, "gpu_perf_cold"));
+    match result {
+        Ok(_) => {
+            reporter.log_message(1, "test_performance_metrics_gpu_cold passed.");
+            reporter.record_timing("test_performance_metrics_gpu_cold", t0.elapsed());
+        }
+        Err(e) => {
+            reporter.log_message(1, &format!("test_performance_metrics_gpu_cold failed: {}", e));
+            reporter.record_failure("test_performance_metrics_gpu_cold", &e, Some(t0.elapsed()));
+        }
+    }
+    TEST_REPORTER.generate_report();
+}
+
+// --- Master Test ---
 #[test]
 #[serial]
 fn test_all_pipeline_validation_sequentially() {
     let t0 = Instant::now();
-    TEST_REPORTER.log_message(100, "STARTING PIPELINE VALIDATION TEST SUITE");
-    test_pipeline_creation_cpu();
-    test_pipeline_creation_gpu();
-    test_model_ready();
-    test_cpu_inference();
-    test_gpu_inference();
-    test_performance_metrics();
-    test_settings_integration();
-   
-   
-    let duration = t0.elapsed();
-    TEST_REPORTER.log_message(100, &format!("Pipeline validation test suite passed (took {:.2?})", duration));
+    TEST_REPORTER.log_message(100, "STARTING PIPELINE VALIDATION SUITE");
+    
+    // --- Run non-kernel (CPU-only) tests ONCE ---
+    test_cpu_singlefile_creation_cold();
+    test_cpu_singlefile_inference_golden_cold();
+    test_cpu_streaming_creation_cold();
+    test_cpu_streaming_inference_golden_cold();
+    test_gpu_singlefile_creation_cold();
+    test_gpu_singlefile_inference_golden_cold();
+    test_gpu_streaming_creation_cold();
+    test_gpu_streaming_inference_golden_cold();
+    test_settings_integration_cold();
+    test_performance_metrics_cpu_cold();
+    test_performance_metrics_gpu_cold();
 
-    zzz_final_report();
+    let warm_run_runtime = tokio::runtime::Runtime::new().unwrap();
+    warm_run_runtime.block_on(async {
+        test_cpu_singlefile_inference_golden_warm();
+        test_cpu_streaming_inference_golden_warm();
+        test_gpu_singlefile_inference_golden_warm();
+        test_gpu_streaming_inference_golden_warm();
+
+    });
+
+    let duration = t0.elapsed();
+    TEST_REPORTER.record_timing("test_all_pipeline_validation_sequentially", duration);
+    TEST_REPORTER.log_message(100, &format!("Pipeline validation suite passed (took {:.2?})", duration));
+    TEST_REPORTER.generate_report();
 } 

@@ -19,7 +19,7 @@ pub fn mini_model_config() -> ModelConfig {
         num_key_value_heads: 2,
         vocab_size: 8,
         rms_norm_eps: 1e-6,
-        dropout: 0.0,
+        dropout: Some(0.0),
         max_seq_len: 8,
     }
 }

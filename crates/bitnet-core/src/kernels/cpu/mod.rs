@@ -44,6 +44,7 @@ pub fn execute(
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") {
+            log::info!("[BitNet][CPU] Using AVX2 kernel");
             return unsafe {
                 x86::qgemm_lut_avx2(
                     q_activations,
@@ -55,11 +56,14 @@ pub fn execute(
                     out_features,
                 )
             };
+        } else {
+            log::warn!("[BitNet][CPU] AVX2 not detected, falling back to scalar kernel");
         }
     }
     #[cfg(target_arch = "aarch64")]
     {
         if is_aarch64_feature_detected!("neon") {
+            log::info!("[BitNet][CPU] Using NEON kernel");
             return unsafe {
                 arm::qgemm_lut_neon(
                     q_activations,
@@ -71,8 +75,11 @@ pub fn execute(
                     out_features,
                 )
             };
+        } else {
+            log::warn!("[BitNet][CPU] NEON not detected, falling back to scalar kernel");
         }
     }
+    log::warn!("[BitNet][CPU] Using scalar kernel (no SIMD detected)");
     // Fallback to the scalar implementation if no SIMD features are available.
     scalar::qgemm_lut_scalar(
         q_activations,
