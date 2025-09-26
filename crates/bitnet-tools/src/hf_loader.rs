@@ -73,7 +73,7 @@ pub fn download_model_and_tokenizer_with_progress(
         let name = &sibling.rfilename;
         // Only use HEAD request to get Content-Length for size
         let mut size = 0u64;
-        let url = format!("{}/{}", base_repo_url, name);
+        let url = format!("{}{}", base_repo_url, name);
         if let Ok(resp) = client.head(&url).send() {
             if let Some(len) = resp.headers().get(CONTENT_LENGTH) {
                 if let Ok(len) = len.to_str().unwrap_or("").parse::<u64>() {
@@ -87,50 +87,41 @@ pub fn download_model_and_tokenizer_with_progress(
             total_size += size;
         }
     }
-    let overall_pb = ProgressBar::new(total_size);
-    overall_pb.set_style(ProgressStyle::with_template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})").unwrap());
+        let overall_pb = ProgressBar::new(total_size);
+        overall_pb.set_style(ProgressStyle::with_template("[{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})").unwrap());
 
-    for file in &files {
-        let out_path = dest.join(file);
-        if out_path.exists() {
-            println!("Already present: {}", file);
-            // Checksum validation skipped: expected hash not available
-            continue;
-        }
-        print!("Downloading: {}... ", file);
-        io::stdout().flush().ok();
-        match repo.get(file) {
-            Ok(path) => {
-                let mut src = File::open(&path)?;
-                let mut dst = File::create(&out_path)?;
-                let size = file_sizes.get(&file.to_string()).copied().unwrap_or(0);
-                let pb = if size > 0 {
-                    let pb = ProgressBar::new(size);
-                    pb.set_style(ProgressStyle::with_template("{bar:40.cyan/blue} {bytes}/{total_bytes} ({percent}%)").unwrap());
-                    Some(pb)
-                } else {
-                    None
-                };
-                let mut buf = [0u8; 8192];
-                loop {
-                    let n = src.read(&mut buf)?;
-                    if n == 0 { break; }
-                    dst.write_all(&buf[..n])?;
-                    overall_pb.inc(n as u64);
-                    if let Some(ref pb) = pb {
-                        pb.inc(n as u64);
-                    }
-                }
-                if let Some(pb) = pb {
-                    pb.finish_and_clear();
-                }
+        for file in &files {
+            let out_path = dest.join(file);
+            if out_path.exists() {
+                println!("Already present: {}", file);
                 // Checksum validation skipped: expected hash not available
-                println!("done");
-            },
-            Err(_e) => {
-                println!("not found in repo");
+                continue;
             }
+            print!("[PROFILE] Downloading: {}... ", file);
+            io::stdout().flush().ok();
+
+        // Construct the correct download URL using your fixed base URL
+        let download_url = format!("{}{}", base_repo_url, file);
+        println!("[PROFILE] Downloading: {} from {}...", file, download_url);
+
+        let mut dst = File::create(&out_path)?;
+        let mut response = client.get(&download_url).send()?; // Use your reqwest client to GET
+
+        // Check if the request was successful
+        if !response.status().is_success() {
+            println!("[WARN] not found in repo (status: {})", response.status());
+            continue; // Skip to the next file
         }
+
+        // Stream the download to the file
+        let mut buf = [0u8; 8192];
+        loop {
+            let n = response.read(&mut buf)?;
+            if n == 0 { break; }
+            dst.write_all(&buf[..n])?;
+            overall_pb.inc(n as u64);
+        }
+        println!("done");
     }
     overall_pb.finish_and_clear();
     Ok(())
