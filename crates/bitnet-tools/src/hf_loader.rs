@@ -68,12 +68,12 @@ pub fn download_model_and_tokenizer_with_progress(
     let mut file_sizes: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
     let mut total_size: u64 = 0;
     let client = Client::new();
-    let base_repo_url = format!("https://huggingface.co/{}/resolve/main/", model_id);
+    let base_repo_url = format!("https://huggingface.co/{}/blob/main/", model_id);
     for sibling in &repo_info.siblings {
         let name = &sibling.rfilename;
         // Only use HEAD request to get Content-Length for size
         let mut size = 0u64;
-        let url = format!("{}{}", base_repo_url, name);
+        let url = format!("{}/{}", base_repo_url, name);
         if let Ok(resp) = client.head(&url).send() {
             if let Some(len) = resp.headers().get(CONTENT_LENGTH) {
                 if let Ok(len) = len.to_str().unwrap_or("").parse::<u64>() {
